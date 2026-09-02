@@ -1,59 +1,61 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# playboss-api
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+API REST en Laravel 12 para PlayBoss (plataforma de apuestas deportivas). Expone autenticación de usuarios (Sanctum) y, a futuro, el resto del dominio: catálogo deportivo, apuestas, cuenta/billetera y transacciones.
 
-## About Laravel
+## Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.2+ / Laravel 12
+- MySQL (base de datos `playboss`, esquema ya modelado en 32 tablas)
+- Laravel Sanctum (tokens de acceso para el front)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Arquitectura / convenciones
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Sigue el mismo patrón que otros backends del equipo (ver `tiendas-virtuales-back`):
 
-## Learning Laravel
+- `app/Http/Controllers/Api/Controller.php`: controller base con un contrato de respuesta único — `{ error, mensaje, data }` — y helpers (`sendResponse()`, `agregarError()`, `setDataResponse()`, `validateRequestRules()`). Todos los controllers de API extienden de aquí.
+- `app/Service/SvcXxx.php`: la lógica de negocio y el acceso a modelos vive en Services con prefijo `Svc` (no en los controllers). Los métodos que tocan base de datos van con `try/catch` + log.
+- `app/Models/<Dominio>/`: un modelo Eloquent por tabla, agrupados por dominio (ej. `app/Models/Usuario/Usuario.php`).
+- `database/sql/playboss-schema.sql`: **fuente de verdad del esquema de negocio** (32 tablas). Se versiona junto con el código y se ejecuta desde una migración (`create_playboss_schema_from_sql`) — no se edita a mano tabla por tabla salvo cambios puntuales vía migraciones complementarias.
+- `routes/api.php`: rutas agrupadas por prefijo (`Route::prefix('auth')->group(...)`).
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## Requisitos
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+- PHP 8.2+, Composer
+- MySQL 8+ con una base de datos ya creada (por defecto `playboss`)
 
-## Laravel Sponsors
+## Puesta en marcha
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```bash
+composer install
+cp .env.example .env
+# Editar .env: DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD con tus credenciales reales
+php artisan key:generate
 
-### Premium Partners
+php artisan migrate   # crea solo lo que falte (Sanctum, etc.) — el esquema de negocio ya existente no se toca
+php artisan db:seed   # siembra catálogos base: tipo_documento, rol, estado_usuario
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+php artisan serve --host=127.0.0.1 --port=8811
+```
 
-## Contributing
+La API queda en `http://127.0.0.1:8811/api`.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+> También hay un vhost de Apache apuntando a `public/`, pero requiere que el usuario del servidor web tenga permisos de lectura sobre el proyecto (pendiente de ajustar en este servidor) — mientras tanto usar `php artisan serve`.
 
-## Code of Conduct
+## Endpoints actuales
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```
+POST /api/auth/registro   — crea un usuario y devuelve token
+POST /api/auth/login      — valida credenciales y devuelve token
+POST /api/auth/logout     — revoca el token actual        (requiere Bearer token)
+GET  /api/auth/me         — datos del usuario autenticado  (requiere Bearer token)
+```
 
-## Security Vulnerabilities
+Cada intento de login/registro queda auditado en la tabla `login` (ip, dispositivo, éxito/fallo y el id del token emitido en `personal_access_tokens`).
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Base de datos
 
-## License
+El esquema completo vive en `database/sql/playboss-schema.sql`. Las migraciones en `database/migrations/` son la forma "Laravel" de aplicar ese esquema (y las complementarias que vengan después) de manera versionada — corren seguro tanto en una base nueva (`migrate:fresh`) como en una que ya tiene el esquema cargado.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Pendiente (próximas entregas)
+
+Catálogo deportivo (ligas, equipos, jugadores, partidos, cuotas), apuestas, cuenta/billetera, transacciones, recuperación de contraseña.
