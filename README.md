@@ -56,6 +56,21 @@ Cada intento de login/registro queda auditado en la tabla `login` (ip, dispositi
 
 El esquema completo vive en `database/sql/playboss-schema.sql`. Las migraciones en `database/migrations/` son la forma "Laravel" de aplicar ese esquema (y las complementarias que vengan después) de manera versionada — corren seguro tanto en una base nueva (`migrate:fresh`) como en una que ya tiene el esquema cargado.
 
+### Datos de ejemplo (`database/sql/seeds/`)
+
+Cada archivo tiene su propia migración (`seed_XX_...`), usan `INSERT IGNORE` (re-ejecutar `migrate` es seguro) y se corren con `php artisan migrate` normal:
+
+| Archivo | Contenido | Origen del dato |
+|---|---|---|
+| `01_catalogos_generales.sql` | países, posiciones, estados, métodos de pago | catálogo genérico |
+| `02_empresa.sql` | 1 fila: PlayBoss S.A.S. | **placeholder** (NIT/licencia no son reales) |
+| `03_geografia_liga_equipos.sql` | ciudades, estadios, liga colombiana, temporada 2026-I, 20 equipos | **real** (Categoría Primera A / Liga BetPlay Dimayor, Torneo Apertura 2026 — Wikipedia) |
+| `04_jugadores.sql` | ~16 jugadores por equipo | **sintético** — no se consiguió el roster real de cada club, ver comentario en el archivo |
+| `05_calendario.sql` | 19 jornadas; partidos de la jornada 1 y 2 | jornada 1 **real** (resultados confirmados); jornada 2 generada por round-robin (programada, sin resultado); jornadas 3-19 solo con fechas |
+| `06_cuotas.sql` | cuotas 1X2 de los partidos de jornada 2 | demo/desarrollo |
+| `07_historico_alineaciones.sql` | vínculo jugador-equipo y alineación titular (4-4-2) de jornada 1 | sintético, ligado a `04_jugadores.sql` |
+| `09_usuarios_demo.sql` | 5 usuarios (1 admin) + su billetera | **solo dev/QA** — contraseñas de prueba `Demo12345!` / `Admin12345!` |
+
 ## Pendiente (próximas entregas)
 
-Catálogo deportivo (ligas, equipos, jugadores, partidos, cuotas), apuestas, cuenta/billetera, transacciones, recuperación de contraseña.
+Apuestas y transacciones de ejemplo, rosters reales (reemplazar `04_jugadores.sql`), resto del calendario (jornadas 3-19), cuenta/billetera real, recuperación de contraseña.
