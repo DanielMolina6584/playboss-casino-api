@@ -12,6 +12,9 @@
 /.vscode
 /.zed
 /auth.json
+/storage/app/private/credentials/
+/storage/app/private/firebase/
+/storage/app/private/google-drive/
 /node_modules
 /public/build
 /public/hot
