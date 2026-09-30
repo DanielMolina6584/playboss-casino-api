@@ -1,6 +1,6 @@
 -- =============================================================================
 -- PLAYBOSS — SCRIPT DE BASE DE DATOS (MySQL 8+)
--- Modelo en 3FN — 32 tablas
+-- Modelo en 3FN — 33 tablas
 -- Orden de creación respeta las dependencias de llaves foráneas.
 -- =============================================================================
 
@@ -156,11 +156,11 @@ CREATE TABLE jugador (
     id_jugador           INT             NOT NULL AUTO_INCREMENT,
     primer_nombre         VARCHAR(50)     NOT NULL,
     segundo_nombre        VARCHAR(50)     NULL,
-    primer_apellido       VARCHAR(50)     NOT NULL,
+    primer_apellido       VARCHAR(50)     NULL,
     segundo_apellido      VARCHAR(50)     NULL,
-    fecha_nacimiento       DATE            NOT NULL,
-    pais_codigo           CHAR(2)         NOT NULL,
-    posicion_codigo       VARCHAR(3)      NOT NULL,
+    fecha_nacimiento       DATE            NULL,
+    pais_codigo           CHAR(2)         NULL,
+    posicion_codigo       VARCHAR(3)      NULL,
     equipo_actual_id      INT             NULL,
     dorsal                  SMALLINT        NULL,
     foto_url                VARCHAR(255)    NULL,
@@ -175,43 +175,16 @@ CREATE TABLE jugador (
     INDEX idx_jugador_pais (pais_codigo)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-CREATE TABLE jugador_equipo_historico (
-    jugador_id      INT             NOT NULL,
-    equipo_id        INT             NOT NULL,
-    fecha_inicio      DATE            NOT NULL,
-    fecha_fin          DATE            NULL,
-    tipo_vinculo      VARCHAR(20)     NULL,
-    CONSTRAINT pk_jugador_equipo_historico PRIMARY KEY (jugador_id, equipo_id, fecha_inicio),
-    CONSTRAINT fk_jeh_jugador FOREIGN KEY (jugador_id)
-        REFERENCES jugador (id_jugador) ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_jeh_equipo FOREIGN KEY (equipo_id)
-        REFERENCES equipo (id_equipo) ON UPDATE CASCADE ON DELETE CASCADE
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
-
 -- =============================================================================
 -- 5. USUARIOS Y SEGURIDAD
 -- =============================================================================
 
 CREATE TABLE usuario (
-    id_usuario               BIGINT          NOT NULL AUTO_INCREMENT,
-    primer_nombre             VARCHAR(50)     NOT NULL,
-    segundo_nombre            VARCHAR(50)     NULL,
-    primer_apellido           VARCHAR(50)     NOT NULL,
-    segundo_apellido          VARCHAR(50)     NULL,
-    tipo_documento_codigo    VARCHAR(5)      NOT NULL,
-    numero_documento          VARCHAR(20)     NOT NULL,
-    rol_codigo                VARCHAR(15)     NOT NULL,
-    correo                     VARCHAR(120)    NOT NULL,
-    celular                    VARCHAR(20)     NULL,
-    fecha_nacimiento           DATE            NOT NULL,
-    estado_codigo             VARCHAR(5)      NOT NULL,
-    fecha_registro             TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    contrasena_hash            VARCHAR(255)    NOT NULL,
+    id_usuario      BIGINT          NOT NULL AUTO_INCREMENT,
+    rol_codigo      VARCHAR(15)     NOT NULL,
+    estado_codigo   VARCHAR(5)      NOT NULL,
+    fecha_registro  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_usuario PRIMARY KEY (id_usuario),
-    CONSTRAINT uq_usuario_correo UNIQUE (correo),
-    CONSTRAINT uq_usuario_documento UNIQUE (tipo_documento_codigo, numero_documento),
-    CONSTRAINT fk_usuario_tipo_documento FOREIGN KEY (tipo_documento_codigo)
-        REFERENCES tipo_documento (codigo) ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_usuario_rol FOREIGN KEY (rol_codigo)
         REFERENCES rol (codigo) ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_usuario_estado FOREIGN KEY (estado_codigo)
@@ -220,7 +193,35 @@ CREATE TABLE usuario (
     INDEX idx_usuario_estado (estado_codigo)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-CREATE TABLE login (
+CREATE TABLE usuario_credencial (
+    usuario_id       BIGINT          NOT NULL,
+    correo           VARCHAR(120)    NOT NULL,
+    contrasena_hash  VARCHAR(255)    NOT NULL,
+    CONSTRAINT pk_usuario_credencial PRIMARY KEY (usuario_id),
+    CONSTRAINT uq_usuario_credencial_correo UNIQUE (correo),
+    CONSTRAINT fk_usuario_credencial_usuario FOREIGN KEY (usuario_id)
+        REFERENCES usuario (id_usuario) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE usuario_perfil (
+    usuario_id             BIGINT          NOT NULL,
+    primer_nombre          VARCHAR(50)     NOT NULL,
+    segundo_nombre         VARCHAR(50)     NULL,
+    primer_apellido        VARCHAR(50)     NOT NULL,
+    segundo_apellido       VARCHAR(50)     NULL,
+    tipo_documento_codigo  VARCHAR(5)      NOT NULL,
+    numero_documento       VARCHAR(20)     NOT NULL,
+    celular                VARCHAR(20)     NULL,
+    fecha_nacimiento       DATE            NOT NULL,
+    CONSTRAINT pk_usuario_perfil PRIMARY KEY (usuario_id),
+    CONSTRAINT uq_usuario_perfil_documento UNIQUE (tipo_documento_codigo, numero_documento),
+    CONSTRAINT fk_usuario_perfil_usuario FOREIGN KEY (usuario_id)
+        REFERENCES usuario (id_usuario) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_usuario_perfil_tipo_documento FOREIGN KEY (tipo_documento_codigo)
+        REFERENCES tipo_documento (codigo) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE logs (
     id_login       BIGINT          NOT NULL AUTO_INCREMENT,
     usuario_id      BIGINT          NOT NULL,
     fecha_hora       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -228,10 +229,10 @@ CREATE TABLE login (
     dispositivo      VARCHAR(150)    NULL,
     exitoso           BOOLEAN         NOT NULL,
     motivo_fallo     VARCHAR(100)    NULL,
-    CONSTRAINT pk_login PRIMARY KEY (id_login),
-    CONSTRAINT fk_login_usuario FOREIGN KEY (usuario_id)
+    CONSTRAINT pk_logs PRIMARY KEY (id_login),
+    CONSTRAINT fk_logs_usuario FOREIGN KEY (usuario_id)
         REFERENCES usuario (id_usuario) ON UPDATE CASCADE ON DELETE CASCADE,
-    INDEX idx_login_usuario_fecha (usuario_id, fecha_hora)
+    INDEX idx_logs_usuario_fecha (usuario_id, fecha_hora)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE codigo_recuperacion (
@@ -453,5 +454,5 @@ CREATE TABLE log_pago (
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =============================================================================
--- FIN DEL SCRIPT — 32 tablas
+-- FIN DEL SCRIPT — 33 tablas
 -- =============================================================================

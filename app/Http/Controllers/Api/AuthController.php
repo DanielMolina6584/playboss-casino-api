@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Service\SvcUsuario;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
@@ -23,8 +24,17 @@ class AuthController extends Controller
             'primer_apellido'       => 'required|string|max:50',
             'segundo_apellido'      => 'nullable|string|max:50',
             'tipo_documento_codigo' => 'required|string|exists:tipo_documento,codigo',
-            'numero_documento'      => 'required|string|max:20|unique:usuario,numero_documento',
-            'correo'                => 'required|email|max:120|unique:usuario,correo',
+            'numero_documento'      => [
+                'required',
+                'string',
+                'max:20',
+                Rule::unique('usuario_perfil', 'numero_documento')
+                    ->where(fn ($query) => $query->where(
+                        'tipo_documento_codigo',
+                        $this->getDataBody('tipo_documento_codigo')
+                    )),
+            ],
+            'correo'                => 'required|email|max:120|unique:usuario_credencial,correo',
             'celular'               => 'nullable|string|max:20',
             'fecha_nacimiento'      => 'required|date',
             'contrasena'            => 'required|string|min:8|confirmed',
@@ -52,7 +62,7 @@ class AuthController extends Controller
             $nuevoToken->accessToken->id
         );
 
-        $this->setDataResponse($usuario->toArray(), 'usuario');
+        $this->setDataResponse($usuario->datosPublicos(), 'usuario');
         $this->setDataResponse($nuevoToken->plainTextToken, 'token');
         $this->respSinError();
         return $this->sendResponse(201);
@@ -102,7 +112,7 @@ class AuthController extends Controller
             $nuevoToken->accessToken->id
         );
 
-        $this->setDataResponse($usuarioEncontrado->toArray(), 'usuario');
+        $this->setDataResponse($usuarioEncontrado->datosPublicos(), 'usuario');
         $this->setDataResponse($nuevoToken->plainTextToken, 'token');
         $this->respSinError();
         return $this->sendResponse();
@@ -124,7 +134,7 @@ class AuthController extends Controller
      */
     public function me(): JsonResponse
     {
-        $this->setDataResponse($this->request->user()->toArray(), 'usuario');
+        $this->setDataResponse($this->request->user()->datosPublicos(), 'usuario');
         $this->respSinError();
         return $this->sendResponse();
     }

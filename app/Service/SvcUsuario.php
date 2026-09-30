@@ -3,6 +3,8 @@
 namespace App\Service;
 
 use App\Models\Usuario\Usuario;
+use App\Models\Usuario\CredencialUsuario;
+use App\Models\Usuario\PerfilUsuario;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -23,24 +25,34 @@ class SvcUsuario
     public function registrar(array $datos): ?Usuario
     {
         try {
-            $usuario = new Usuario();
-            $usuario->fill([
-                'primer_nombre'         => $datos['primer_nombre'],
-                'segundo_nombre'        => $datos['segundo_nombre'] ?? null,
-                'primer_apellido'       => $datos['primer_apellido'],
-                'segundo_apellido'      => $datos['segundo_apellido'] ?? null,
-                'tipo_documento_codigo' => $datos['tipo_documento_codigo'],
-                'numero_documento'      => $datos['numero_documento'],
-                'rol_codigo'            => $datos['rol_codigo'] ?? self::ROL_DEFECTO,
-                'correo'                => $datos['correo'],
-                'celular'               => $datos['celular'] ?? null,
-                'fecha_nacimiento'      => $datos['fecha_nacimiento'],
-                'estado_codigo'         => $datos['estado_codigo'] ?? self::ESTADO_DEFECTO,
-            ]);
-            $usuario->contrasena_hash = Hash::make($datos['contrasena']);
-            $usuario->save();
+            return DB::transaction(function () use ($datos): Usuario {
+                $usuario = new Usuario();
+                $usuario->fill([
+                    'rol_codigo' => $datos['rol_codigo'] ?? self::ROL_DEFECTO,
+                    'estado_codigo' => $datos['estado_codigo'] ?? self::ESTADO_DEFECTO,
+                ]);
+                $usuario->save();
 
-            return $usuario;
+                $credencial = new CredencialUsuario();
+                $credencial->correo = $datos['correo'];
+                $credencial->contrasena_hash = Hash::make($datos['contrasena']);
+                $usuario->credencial()->save($credencial);
+
+                $perfil = new PerfilUsuario();
+                $perfil->fill([
+                    'primer_nombre' => $datos['primer_nombre'],
+                    'segundo_nombre' => $datos['segundo_nombre'] ?? null,
+                    'primer_apellido' => $datos['primer_apellido'],
+                    'segundo_apellido' => $datos['segundo_apellido'] ?? null,
+                    'tipo_documento_codigo' => $datos['tipo_documento_codigo'],
+                    'numero_documento' => $datos['numero_documento'],
+                    'celular' => $datos['celular'] ?? null,
+                    'fecha_nacimiento' => $datos['fecha_nacimiento'],
+                ]);
+                $usuario->perfil()->save($perfil);
+
+                return $usuario;
+            });
         } catch (\Exception $err) {
             Log::channel('single')->error('SvcUsuario::registrar - ' . $err->getMessage());
             return null;
@@ -55,7 +67,9 @@ class SvcUsuario
     public function buscarPorCorreo(string $correo): ?Usuario
     {
         try {
-            return Usuario::where('correo', $correo)->first();
+            return Usuario::with('credencial', 'perfil')
+                ->whereHas('credencial', fn ($query) => $query->where('correo', $correo))
+                ->first();
         } catch (\Exception $err) {
             Log::channel('single')->error('SvcUsuario::buscarPorCorreo - ' . $err->getMessage());
             return null;
@@ -70,7 +84,7 @@ class SvcUsuario
      */
     public function verificarContrasena(Usuario $usuario, string $contrasena): bool
     {
-        return Hash::check($contrasena, $usuario->contrasena_hash);
+        return Hash::check($contrasena, $usuario->getAuthPassword());
     }
 
     /**
@@ -83,7 +97,7 @@ class SvcUsuario
     {
         $usuario = $this->buscarPorCorreo($correo);
 
-        if (!$usuario || !Hash::check($contrasena, $usuario->contrasena_hash)) {
+        if (!$usuario || !$this->verificarContrasena($usuario, $contrasena)) {
             return null;
         }
 
@@ -91,7 +105,7 @@ class SvcUsuario
     }
 
     /**
-     * Registra un intento de acceso en la tabla "login" (auditoría de sesiones).
+     * Registra un intento de acceso en la tabla "logs" (auditoría de sesiones).
      * Solo se registra cuando existe un usuario_id válido, ya que la tabla
      * exige la relación con "usuario".
      * @param int $usuarioId
@@ -111,7 +125,7 @@ class SvcUsuario
         ?int $tokenId = null
     ): void {
         try {
-            DB::table('login')->insert([
+            DB::table('logs')->insert([
                 'usuario_id'                => $usuarioId,
                 'fecha_hora'                => now(),
                 'ip_origen'                 => $ip,

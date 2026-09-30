@@ -4,6 +4,7 @@ namespace App\Models\Usuario;
 
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Laravel\Sanctum\HasApiTokens;
 
 class Usuario extends Authenticatable
@@ -17,37 +18,40 @@ class Usuario extends Authenticatable
     public $timestamps = false;
 
     protected $fillable = [
-        'primer_nombre',
-        'segundo_nombre',
-        'primer_apellido',
-        'segundo_apellido',
-        'tipo_documento_codigo',
-        'numero_documento',
         'rol_codigo',
-        'correo',
-        'celular',
-        'fecha_nacimiento',
         'estado_codigo',
-        'fecha_registro',
-    ];
-
-    protected $hidden = [
-        'contrasena_hash',
     ];
 
     protected function casts(): array
     {
-        return [
-            'fecha_nacimiento' => 'date',
-            'fecha_registro' => 'datetime',
-        ];
+        return ['fecha_registro' => 'datetime'];
     }
 
-    /**
-     * Requerido por el contrato Authenticatable: la columna de contraseña real es "contrasena_hash".
-     */
+    public function credencial(): HasOne
+    {
+        return $this->hasOne(CredencialUsuario::class, 'usuario_id', 'id_usuario');
+    }
+
+    public function perfil(): HasOne
+    {
+        return $this->hasOne(PerfilUsuario::class, 'usuario_id', 'id_usuario');
+    }
+
     public function getAuthPassword(): string
     {
-        return $this->contrasena_hash;
+        return $this->credencial?->contrasena_hash ?? '';
+    }
+
+    public function datosPublicos(): array
+    {
+        $this->loadMissing(['credencial', 'perfil']);
+        $perfil = $this->perfil?->attributesToArray() ?? [];
+        unset($perfil['usuario_id']);
+
+        return array_merge(
+            $this->attributesToArray(),
+            $perfil,
+            ['correo' => $this->credencial?->correo]
+        );
     }
 }

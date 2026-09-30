@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    'firebase' => [
+        'credentials' => env('FIREBASE_CREDENTIALS'),
+        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'firestore_database' => env('FIREBASE_FIRESTORE_DATABASE', '(default)'),
+    ],
+
+    'google_drive' => [
+        'credentials' => env('GOOGLE_DRIVE_CREDENTIALS'),
+        'folder_id' => env('GOOGLE_DRIVE_FOLDER_ID'),
+        'shared_drive_id' => env('GOOGLE_DRIVE_SHARED_DRIVE_ID'),
+    ],
+
 ];
