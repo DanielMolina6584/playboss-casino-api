@@ -1,27 +1,3 @@
--- Liga BetPlay 2026. Ejecutar despues del esquema y una sola vez.
--- Clubes/participantes: DIMAYOR fixtures 2026-I y 2026-II.
--- Plantillas activas (670): ESPN API, tercero/no oficial; fecha de consulta 2026-09-30.
--- Capacidades y datos biograficos faltantes se dejan NULL. No se inventan fixtures oficiales.
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/9761/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/8109/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/9762/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/6137/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5264/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/4815/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5480/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/6101/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/2672/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5485/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5486/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5489/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/4928/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/2690/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5488/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/7445/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/10309/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/7915/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/5484/roster?season=2026
--- Roster: https://site.web.api.espn.com/apis/site/v2/sports/soccer/col.1/teams/2919/roster?season=2026
 SET XACT_ABORT ON;
 BEGIN TRANSACTION;
 DELETE FROM alineacion;
