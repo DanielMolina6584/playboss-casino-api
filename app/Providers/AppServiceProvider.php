@@ -5,7 +5,16 @@ namespace App\Providers;
 use Google\Client as GoogleClient;
 use Google\Service\Drive;
 use Google\Service\Firestore;
+use App\Contracts\PaymentGateway;
+use App\Service\Payment\FirebaseFunctionPaymentGateway;
+use App\Service\Payment\WompiPaymentGateway;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+use InvalidArgumentException;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Sanctum\Sanctum;
+use App\Models\Usuario\PersonalAccessToken;
 use RuntimeException;
 
 class AppServiceProvider extends ServiceProvider
@@ -15,6 +24,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(PaymentGateway::class, function ($app): PaymentGateway {
+            return match (config('services.payment_gateway.driver')) {
+                'wompi' => $app->make(WompiPaymentGateway::class),
+                'firebase_function' => $app->make(FirebaseFunctionPaymentGateway::class),
+                default => throw new InvalidArgumentException('PAYMENT_GATEWAY_DRIVER no está soportado.'),
+            };
+        });
+
         $this->app->singleton(Firestore::class, function (): Firestore {
             $projectId = config('services.firebase.project_id');
 
@@ -52,7 +69,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        $porUsuarioOIp = fn (Request $r) => (string) ($r->user()?->getAuthIdentifier() ?? $r->ip());
+        RateLimiter::for('login', fn (Request $r) => [
+            Limit::perMinute(5)->by(mb_strtolower((string) $r->input('correo')) . '|' . $r->ip()),
+            Limit::perMinute(30)->by($r->ip()),
+        ]);
+        RateLimiter::for('recuperacion', fn (Request $r) => Limit::perMinute(5)->by($r->ip()));
+        RateLimiter::for('apuestas', fn (Request $r) => Limit::perMinute(20)->by($porUsuarioOIp($r)));
+        RateLimiter::for('pagos', fn (Request $r) => Limit::perMinute(10)->by($porUsuarioOIp($r)));
+        RateLimiter::for('webhook', fn (Request $r) => Limit::perMinute(120)->by($r->ip()));
     }
 
     private function credentialFilePath(mixed $path, string $environmentVariable): string

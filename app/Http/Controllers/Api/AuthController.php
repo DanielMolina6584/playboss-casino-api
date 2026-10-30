@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Service\SvcUsuario;
+use App\Models\Usuario\CredencialUsuario;
+use App\Models\Usuario\PerfilUsuario;
+use App\Models\Usuario\TipoDocumento;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
 
@@ -23,19 +26,19 @@ class AuthController extends Controller
             'segundo_nombre'        => 'nullable|string|max:50',
             'primer_apellido'       => 'required|string|max:50',
             'segundo_apellido'      => 'nullable|string|max:50',
-            'tipo_documento_codigo' => 'required|string|exists:tipo_documento,codigo',
+            'tipo_documento_codigo' => ['required', 'string', Rule::exists(TipoDocumento::class, 'codigo')],
             'numero_documento'      => [
                 'required',
                 'string',
                 'max:20',
-                Rule::unique('usuario_perfil', 'numero_documento')
+                Rule::unique(PerfilUsuario::class, 'numero_documento')
                     ->where(fn ($query) => $query->where(
                         'tipo_documento_codigo',
                         $this->getDataBody('tipo_documento_codigo')
                     )),
             ],
-            'correo'                => 'required|email|max:120|unique:usuario_credencial,correo',
-            'celular'               => 'nullable|string|max:20',
+            'correo'                => ['required', 'email', 'max:120', Rule::unique(CredencialUsuario::class, 'correo')],
+            'celular'               => ['nullable', 'string', 'max:20', 'regex:/^[0-9+\s\-]{7,20}$/'],
             'fecha_nacimiento'      => 'required|date',
             'contrasena'            => 'required|string|min:8|confirmed',
         ]);
@@ -59,7 +62,8 @@ class AuthController extends Controller
             $this->getIp(),
             $this->request->userAgent(),
             null,
-            $nuevoToken->accessToken->id
+            $nuevoToken->accessToken->id,
+            $this->getDataBody('correo')
         );
 
         $this->setDataResponse($usuario->datosPublicos(), 'usuario');
@@ -85,18 +89,19 @@ class AuthController extends Controller
         $correo = $this->getDataBody('correo');
         $usuarioEncontrado = $this->svcUsuario->buscarPorCorreo($correo);
         $credencialesValidas = $usuarioEncontrado
+            && $usuarioEncontrado->estaActivo()
             && $this->svcUsuario->verificarContrasena($usuarioEncontrado, $this->getDataBody('contrasena'));
 
         if (!$credencialesValidas) {
-            if ($usuarioEncontrado) {
-                $this->svcUsuario->registrarIntentoLogin(
-                    $usuarioEncontrado->id_usuario,
-                    false,
-                    $this->getIp(),
-                    $this->request->userAgent(),
-                    'Contraseña incorrecta'
-                );
-            }
+            $this->svcUsuario->registrarIntentoLogin(
+                $usuarioEncontrado?->id_usuario,
+                false,
+                $this->getIp(),
+                $this->request->userAgent(),
+                !$usuarioEncontrado ? 'Usuario no encontrado' : (!$usuarioEncontrado->estaActivo() ? 'Cuenta inactiva' : 'Contraseña incorrecta'),
+                null,
+                $correo
+            );
             $this->agregarError('Correo o contraseña incorrectos.');
             return $this->sendResponse(401);
         }
@@ -109,7 +114,8 @@ class AuthController extends Controller
             $this->getIp(),
             $this->request->userAgent(),
             null,
-            $nuevoToken->accessToken->id
+            $nuevoToken->accessToken->id,
+            $correo
         );
 
         $this->setDataResponse($usuarioEncontrado->datosPublicos(), 'usuario');
