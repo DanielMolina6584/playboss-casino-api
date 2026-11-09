@@ -45,6 +45,8 @@ return [
         'credentials' => env('GOOGLE_DRIVE_CREDENTIALS'),
         'folder_id' => env('GOOGLE_DRIVE_FOLDER_ID'),
         'shared_drive_id' => env('GOOGLE_DRIVE_SHARED_DRIVE_ID'),
+        // Solo en modo OAuth (Gmail personal); se obtiene con php artisan playboss:drive-token.
+        'refresh_token' => env('GOOGLE_DRIVE_REFRESH_TOKEN'),
     ],
 
     // Wompi Colombia. Sandbox: llaves pub_test_/prv_test_ y https://sandbox.wompi.co/v1

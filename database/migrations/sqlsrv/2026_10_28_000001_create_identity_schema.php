@@ -11,6 +11,7 @@ return new class extends Migration
 
     public function up(): void
     {
+        // SQL Server no soporta ON DELETE RESTRICT; NO ACTION tiene el mismo efecto (bloquea el borrado del padre).
         Schema::connection('sqlsrv')->create('rol', function (Blueprint $table) {
             $table->string('codigo', 15)->primary();
             $table->string('nombre', 50);
@@ -34,8 +35,8 @@ return new class extends Migration
             $table->string('estado_codigo', 5);
             $table->timestamp('fecha_registro')->useCurrent();
             $table->rememberToken();
-            $table->foreign('rol_codigo')->references('codigo')->on('rol')->restrictOnDelete();
-            $table->foreign('estado_codigo')->references('codigo')->on('estado_usuario')->restrictOnDelete();
+            $table->foreign('rol_codigo')->references('codigo')->on('rol')->noActionOnDelete();
+            $table->foreign('estado_codigo')->references('codigo')->on('estado_usuario')->noActionOnDelete();
             $table->index('rol_codigo');
             $table->index('estado_codigo');
         });
@@ -60,7 +61,7 @@ return new class extends Migration
             $table->date('fecha_nacimiento');
             $table->unique(['tipo_documento_codigo', 'numero_documento'], 'uq_perfil_documento');
             $table->foreign('usuario_id')->references('id_usuario')->on('usuario')->cascadeOnDelete();
-            $table->foreign('tipo_documento_codigo')->references('codigo')->on('tipo_documento')->restrictOnDelete();
+            $table->foreign('tipo_documento_codigo')->references('codigo')->on('tipo_documento')->noActionOnDelete();
         });
 
         Schema::connection('sqlsrv')->create('codigo_recuperacion', function (Blueprint $table) {
