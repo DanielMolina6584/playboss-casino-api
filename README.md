@@ -1,107 +1,105 @@
-# playboss-api
+# PlayBoss API
 
-API REST en Laravel 12 para PlayBoss (plataforma de apuestas deportivas). Expone autenticación de usuarios (Sanctum) y, a futuro, el resto del dominio: catálogo deportivo, apuestas, cuenta/billetera y transacciones.
-
-## Stack
-
-- PHP 8.2+ / Laravel 12
-- MySQL 8+ o Microsoft SQL Server 2016+ (esquema de 33 tablas)
-- Laravel Sanctum (tokens de acceso para el front)
-
-## Arquitectura / convenciones
-
-Sigue el mismo patrón que otros backends del equipo (ver `tiendas-virtuales-back`):
-
-- `app/Http/Controllers/Api/Controller.php`: controller base con un contrato de respuesta único — `{ error, mensaje, data }` — y helpers (`sendResponse()`, `agregarError()`, `setDataResponse()`, `validateRequestRules()`). Todos los controllers de API extienden de aquí.
-- `app/Service/SvcXxx.php`: la lógica de negocio y el acceso a modelos vive en Services con prefijo `Svc` (no en los controllers). Los métodos que tocan base de datos van con `try/catch` + log.
-- `app/Models/<Dominio>/`: modelos Eloquent agrupados por dominio (ej. `app/Models/Usuario/Usuario.php`).
-- `usuario`, `usuario_credencial` y `usuario_perfil` separan la cuenta, las credenciales de acceso y los datos personales/documento, respectivamente. La tabla `logs` conserva la auditoría de accesos.
-- `database/sql/playboss-schema.sql` y `database/sql/playboss-schema-sqlserver.sql`: DDL equivalente para MySQL y SQL Server. La migración `create_playboss_schema_from_sql` selecciona el archivo según el driver de Laravel.
-- `routes/api.php`: rutas agrupadas por prefijo (`Route::prefix('auth')->group(...)`).
+API Laravel 12 para PlayBoss. El esquema se reparte por propiedad de datos entre SQL Server, MySQL, PostgreSQL y MongoDB; Firebase Functions coordina el proveedor de pagos y Google Drive conserva imágenes.
 
 ## Requisitos
 
 - PHP 8.2+, Composer
-- MySQL 8+ con una base de datos ya creada (por defecto `playboss`)
+- PHP drivers `pdo_mysql`, `pdo_sqlsrv`, `pdo_pgsql` y `mongodb`
+- MySQL/MariaDB, SQL Server, PostgreSQL y MongoDB accesibles según `.env`
+- Node.js/npm para compilar recursos Laravel si se usan
 
-## Puesta en marcha
+## Puesta en marcha local
 
 ```bash
 composer install
 cp .env.example .env
-# Editar .env: APP_URL y DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD
-# APP_URL=http://localhost/playboss-casino-api/public
+# Completa APP_KEY y los endpoints/usuarios/secretos en .env
 php artisan key:generate
-
-php artisan migrate   # crea el esquema y las tablas requeridas por Laravel
-
-# Dar permisos de escritura a Apache en los directorios que Laravel necesita
-sudo chown -R "$USER":www-data storage bootstrap/cache
-sudo chmod -R ug+rwX storage bootstrap/cache
+php artisan playboss:db-check
+php artisan playboss:migrate
 ```
 
-Con el proyecto dentro de `/var/www/html`, Apache lo sirve directamente desde `public/` en:
+Para ejecutar una sola conexión se puede indicar `mysql`, `sqlsrv`, `pgsql` o `mongodb` en los dos comandos. La configuración MySQL local usa la base `dev_playboss`; las otras bases deben existir y tener sus credenciales cargadas. No correr las migraciones en una base compartida con otra aplicación.
 
-- API: `http://localhost/playboss-casino-api/public/api`
-- Health check: `http://localhost/playboss-casino-api/public/up`
+El comando `composer setup` instala dependencias y usa `playboss:migrate`; en una configuración incompleta se detendrá en la primera conexión que no pueda migrar. Las migraciones no son atómicas entre motores.
 
-No es necesario ejecutar `php artisan serve` ni crear un vhost adicional. Apache debe tener habilitado `mod_rewrite` y permitir `.htaccess` en `/var/www/html`; en esta instalación `mod_rewrite` ya está activo.
+## Entidades por conexión
 
-## Endpoints actuales
+- SQL Server: identidad, roles, credenciales, perfil, recuperación y Sanctum.
+- MySQL: catálogos deportivos, ligas, equipos, jugadores, partidos y alineaciones.
+- PostgreSQL: cuentas, apuestas, detalles/cuotas congeladas, movimientos y transacciones.
+- MongoDB: reglas, mercados y logs de autenticación.
+- Firebase Cloud Function: fachada autenticada para un proveedor de pagos elegido.
+- Google Drive: archivos de imagen; los modelos guardan el ID del archivo.
 
+Los modelos viven en `app/Models/<Dominio>` y asignan su conexión explícitamente. Los servicios de dominio están en `app/Service`. Las migraciones activas están en `database/migrations/{sqlsrv,mysql,pgsql,mongodb}`. Las migraciones anteriores de una sola base se archivaron en `database/migrations/legacy` y no se cargan al ejecutar el nuevo comando.
+
+Lee [DATABASE-ARCHITECTURE.md](DATABASE-ARCHITECTURE.md) para el contrato de Cloud Function, variables requeridas y configuración Docker. Los secretos y JSON privados deben quedarse en `.env` local o en el gestor de secretos del despliegue; nunca en Git ni en el frontend.
+
+## API REST
+
+Prefijo `/api`. Todas las respuestas usan el sobre `{ "error": 0|1, "mensaje": [], "data": {...} }`; los errores de validación (422) traen además `data.errores` por campo. Autenticación: `Authorization: Bearer <token>` (Sanctum). Las listas paginadas devuelven `data.items` y `data.meta {page, per_page, total, last_page}` (`?page=&per_page=` máx. 100).
+
+| Grupo | Endpoint | Notas |
+| --- | --- | --- |
+| Auth | `POST /auth/registro`, `POST /auth/login` (5/min por correo+IP y 30/min por IP), `POST /auth/logout`, `GET /auth/me` | |
+| Recuperación | `POST /auth/recuperar` `{correo}`, `POST /auth/restablecer` `{correo, codigo(6 dígitos), contrasena, contrasena_confirmation}` | Código de 15 min, un solo uso, enviado por el mailer configurado (`MAIL_MAILER=log` en local) |
+| Catálogo (público) | `GET /deportes /ligas /temporadas /equipos /estadios /jugadores /jornadas` | Filtros: `q, liga_id, temporada_id, equipo_id, ciudad_id, servicio_codigo, pais_codigo` |
+| | `GET /partidos` | Filtros: `liga_id, temporada_id, jornada_id, equipo_id, estado, desde, hasta, orden` |
+| | `GET /partidos/{id}`, `GET /partidos/{id}/mercados` | Mercados y cuotas activas (MongoDB) |
+| Perfil | `GET /perfil`, `PUT /perfil`, `PUT /perfil/contrasena` | |
+| Cuenta | `GET /cuenta`, `GET /cuenta/movimientos` | Saldo disponible/retenido; filtro `tipo, desde, hasta` |
+| Apuestas | `POST /apuestas`, `GET /apuestas`, `GET /apuestas/{id}`, `POST /apuestas/{id}/cancelar` | 20/min por usuario |
+| Pagos | `POST /pagos/depositos`, `GET /pagos/{referencia}`, `POST /pagos/wompi/webhook` (público) | 10/min por usuario |
+| Admin (rol `ADMIN`) | `apiResource /admin/equipos`, `/admin/ligas`, `/admin/partidos`, `/admin/mercados`, `/admin/reglas` | CRUD; los mercados se suspenden en lugar de borrarse |
+| | `POST /admin/partidos/{id}/liquidar` `{goles_local, goles_visitante, ganadoras?}` | Liquida mercados y apuestas, abona premios |
+| | `POST /admin/apuestas/{id}/anular` | Devuelve el monto retenido |
+
+### Crear apuesta
+
+```json
+POST /api/apuestas
+{ "monto": "10000", "tipo": "COMBINADA", "idempotency_key": "uuid-del-cliente",
+  "selecciones": [ { "match_id": 12, "market_id": "<id mongo>", "selection_code": "1", "odd": 1.85 } ] }
 ```
-POST /api/auth/registro   — crea un usuario y devuelve token
-POST /api/auth/login      — valida credenciales y devuelve token
-POST /api/auth/logout     — revoca el token actual        (requiere Bearer token)
-GET  /api/auth/me         — datos del usuario autenticado  (requiere Bearer token)
-```
 
-Cada intento de login/registro asociado a un usuario queda auditado en `logs` (ip, dispositivo, éxito/fallo y el id del token emitido en `personal_access_tokens`).
+El servidor verifica: usuario activo y mayor de edad (`BET_MIN_AGE` y `min_age` de la regla), partido existente en estado `PROG` y con fecha futura, mercado `ACTIVE`, que la opción exista y su cuota coincida con `odd` si se envía (si cambió responde 409 con `odd_actual`), regla vigente (`ReglaApuesta`: monto mínimo/máximo y pago máximo), sin selecciones duplicadas, **un solo pick por partido** (evita opciones excluyentes en combinadas), máximo `BET_MAX_SELECTIONS`, saldo suficiente y límites diarios (`BET_DAILY_STAKE_LIMIT`, `BET_DAILY_COUNT_LIMIT`). El monto se retiene en PostgreSQL; `idempotency_key` (o header `Idempotency-Key`) evita duplicar la apuesta al reintentar. Pago potencial = monto × producto de cuotas (incluye el monto apostado), calculado en servidor con enteros.
 
-## Base de datos
+### Liquidación
 
-El esquema y el conjunto completo de datos se aplican con `php artisan migrate` usando el driver configurado. La migración carga un único `.sql` por motor: incluye los datos de Liga BetPlay y los datos de prueba de las demás áreas. También puedes ejecutar directamente el DDL y después la carga completa en una base vacía:
+`POST /admin/partidos/{id}/liquidar` marca el partido `FIN` con el marcador, determina la opción ganadora de los mercados estándar (`1X2`, `BTTS`, `OU_<n>_<d>`, p. ej. `OU_2_5`) y guarda el resultado por selección (`apuesta_detalle.resultado`). Para otros mercados (o líneas enteras) indica `ganadoras: {"<market_id o code>": "<opcion>" | "VOID"}`; los no resueltos quedan pendientes. Una apuesta pierde apenas una selección pierde; gana cuando todas ganan (selecciones anuladas cuentan con cuota 1). Cada cierre libera lo retenido y abona el premio en una transacción PostgreSQL con referencia única `liquidacion:apuesta:{id}`, por lo que repetir la llamada no paga dos veces.
 
-| Motor | Crear tablas | Carga completa (Liga + datos demo) |
-|---|---|---|
-| MySQL 8+ | `database/sql/playboss-schema.sql` | `database/sql/data/playboss-complete-demo-mysql.sql` |
-| SQL Server 2016+ | `database/sql/playboss-schema-sqlserver.sql` | `database/sql/data/playboss-complete-demo-sqlserver.sql` |
+### Pagos con Wompi (sandbox)
 
-La migración `2026_09_30_000001_load_liga_colombiana_2026_from_sql` selecciona y ejecuta el archivo completo según `DB_CONNECTION`. Para una base nueva, ejecuta `php artisan migrate`; no se ejecuta `db:seed`. La carga reemplaza equipos, estadios, jugadores, temporadas, jornadas, partidos, alineaciones y cuotas. Incluye además 300 usuarios con credenciales/perfil/cuenta, 600 logs de acceso, 300 códigos de recuperación, 300 partidos demo, 900 cuotas, 6.600 alineaciones, 300 apuestas/detalles, 600 transacciones y 600 logs de pago.
+Driver por defecto recomendado: `PAYMENT_GATEWAY_DRIVER=wompi` (alternativa: `firebase_function`). Variables: `WOMPI_PUBLIC_KEY`, `WOMPI_PRIVATE_KEY`, `WOMPI_EVENTS_SECRET`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_BASE_URL` (`https://sandbox.wompi.co/v1`), `WOMPI_REDIRECT_URL`. Ver [CREDENCIALES.md](CREDENCIALES.md).
 
-La carga está pensada para una base nueva o de pruebas y se ejecuta una sola vez. Se detiene si hay apuestas existentes o si ya encuentra cuentas demo, para no borrar apuestas ni duplicar usuarios. Los 300 partidos, resultados, cuotas, alineaciones, apuestas, pagos y cuentas demo son **ficticios**: solo sirven para probar las funciones de la aplicación y no representan eventos ni operaciones reales. No usar estos datos en producción.
+1. `POST /api/pagos/depositos {monto}` crea una transacción `PENDIENTE` con referencia única `PB-<id>-<rand>` y devuelve `data.checkout` (`public_key, reference, amount_in_cents, currency, signature_integrity, redirect_url, checkout_url`) para el Widget/Web Checkout.
+2. El usuario paga en Wompi. Wompi llama a `POST /api/pagos/wompi/webhook` (evento `transaction.updated`).
+3. El backend valida el checksum del evento con el secreto de eventos, consulta la transacción en la API de Wompi, compara referencia, monto y moneda con la local, registra el evento (`evento_pago`, idempotente por `wompi:<id>:<estado>`) y, si está `APPROVED`, acredita el saldo y crea el movimiento en una única transacción PostgreSQL.
+4. El front consulta `GET /api/pagos/{referencia}`; mientras siga `PENDIENTE` el backend sincroniza con Wompi (sirve si el webhook no llega en local).
+
+Retiros: pendientes (requieren flujo de verificación y desembolso propio; no hay endpoint).
+
+## Pruebas
 
 ```bash
-# MySQL (base playboss ya creada; ejecutar desde la raíz del proyecto)
-mysql -u root -p playboss < database/sql/playboss-schema.sql
-mysql -u root -p playboss < database/sql/data/playboss-complete-demo-mysql.sql
-
-# SQL Server: ejecuta playboss-schema-sqlserver.sql y luego
-# data/playboss-complete-demo-sqlserver.sql desde Management Studio o sqlcmd.
+php vendor/bin/phpunit
 ```
 
-El bloque de Liga contiene los 20 clubes de Primera A y 670 jugadores activos listados por ESPN para 2026, distribuidos según su plantilla; los clubes participantes se contrastaron con DIMAYOR. ESPN es una fuente secundaria, no un registro oficial de plantillas. Los datos biográficos ausentes (fecha para 53 jugadores, nacionalidad para 46, posición para 3, dorsal para 20 y apellido para 4) quedan como `NULL`. Las capacidades de estadio no se verificaron y también quedan `NULL`. Las fechas de temporadas son ventanas administrativas, no calendario oficial. Los fixtures oficiales consultados no permitieron validar todas las fechas y horarios: por eso los 300 partidos cargados son fixtures de prueba inventados, claramente separados de la información real de clubes/plantillas y sin afirmar que sean partidos oficiales.
+Cubren cálculo de pago potencial, reglas de selecciones, resolución de mercados, firma de integridad y checksum de Wompi (HTTP simulado), validaciones de apuestas/depósitos, roles, CORS y webhook. No requieren las bases remotas. Las operaciones transaccionales con PostgreSQL/MongoDB (crear apuesta, liquidar, acreditar saldo) solo se pueden verificar contra bases reales tras `playboss:migrate`, porque el entorno de pruebas no tiene `pdo_sqlite`.
 
-Las 300 cuentas de prueba usan `demo001@playboss.test` hasta `demo300@playboss.test`; todas comparten la contraseña `Demo12345!`. Los saldos y pagos son ficticios y no conectan con pasarelas reales.
+## Documentación Swagger
 
-Fuentes: [DIMAYOR — fixture Liga BetPlay I-2026](https://dimayor.com.co/2025/12/18/fixture-de-las-primeras-19-fechas-de-la-liga-betplay-dimayor-i-2026/), [DIMAYOR — fixture Liga BetPlay II-2026](https://dimayor.com.co/2026/06/03/fixture-de-la-fase-l-todos-contra-todos-de-la-liga-betplay-dimayor-ll-2026/) y [API pública ESPN — Primera A 2026](https://site.api.espn.com/apis/site/v2/sports/soccer/col.1/teams?limit=100&season=2026). Los scripts incluyen el enlace al roster usado para cada equipo.
+La API está documentada con OpenAPI 3.0.3 y Swagger UI (assets `swagger-ui-dist@5.17.14` desde jsDelivr; sin dependencias nuevas de Composer).
 
-Para usar SQL Server como conexión principal de Laravel, configura `DB_CONNECTION=sqlsrv` y completa `SQLSERVER_HOST`, `SQLSERVER_PORT`, `SQLSERVER_DATABASE`, `SQLSERVER_USERNAME` y `SQLSERVER_PASSWORD`; también necesitas `pdo_sqlsrv` instalado en PHP. PostgreSQL se selecciona con `DB_CONNECTION=pgsql` y sus variables `POSTGRES_*`. El DDL y la carga SQL de SQL Server se ejecutan con SQL Server Management Studio o `sqlcmd`.
+- UI: `GET /api/documentation` (botón **Authorize**: pega el token Bearer de `/auth/login`, sin el prefijo `Bearer`).
+- Spec: `GET /api/openapi.json`.
+- Activación: `API_DOCS_ENABLED` (ver `.env.example`). Si se omite, solo está activa con `APP_ENV=local`; con `false` ambas URLs responden 404. Funciona igual en Docker (no usa herramientas de desarrollo).
+- Fuente única: `resources/openapi/openapi.php` (array PHP con helpers y esquemas reutilizables; rutas sin el prefijo `/api`).
 
-## Conexiones externas
+Al agregar o cambiar un endpoint: añade o edita su entrada en `paths` (tag, resumen, parámetros, request/response, errores, `security`) y los esquemas en `components.schemas`. `OpenApiDocsTest` falla si una ruta `/api` no está documentada o si se documenta una que no existe. Para validar el spec con una herramienta externa: volcar el JSON de `/api/openapi.json` a un archivo y ejecutar `npx @redocly/cli lint archivo.json`.
 
-La conexión principal sigue siendo MySQL (`DB_CONNECTION=mysql`). Laravel también tiene conexiones secundarias independientes para SQL Server (`sqlsrv`), PostgreSQL (`pgsql`) y MongoDB (`mongodb`). Sus hosts, bases de datos y usuarios se configuran por separado en `.env` con los prefijos `SQLSERVER_`, `POSTGRES_`, `MYSQL_` y `MONGODB_`. Ejemplos de uso:
+## Errores, límites y CORS
 
-```php
-DB::connection('sqlsrv')->select('SELECT 1');
-DB::connection('pgsql')->select('SELECT 1');
-DB::connection('mongodb')->collection('ejemplo')->get();
-```
-
-Firestore se configura con `FIREBASE_PROJECT_ID`, `FIREBASE_FIRESTORE_DATABASE` y la ruta privada `FIREBASE_CREDENTIALS`; el cliente REST se puede inyectar como `Google\Service\Firestore`. Google Drive usa `GOOGLE_DRIVE_CREDENTIALS` y un folder ID para ubicar archivos. Comparte la carpeta de destino con la cuenta de servicio de Google Drive cuando recibas esas credenciales. Los JSON de credenciales deben guardarse dentro de `storage/app/private/credentials/`, directorio excluido de Git.
-
-Los SDK de MongoDB y Google ya están declarados en Composer. MongoDB requiere la extensión PHP `mongodb`; PostgreSQL necesita `pdo_pgsql`, y SQL Server `pdo_sqlsrv`. Firestore usa el API REST de Google y no requiere la extensión gRPC. El host de desarrollo todavía no tiene habilitadas `mongodb` ni `pdo_sqlsrv`; además, la instalación del paquete PHP de PostgreSQL requiere completar su activación en la configuración PHP local. Las conexiones quedan configuradas, pero esos drivers deben estar activos antes de abrir conexiones a esos motores.
-
-## Pendiente (próximas entregas)
-
-Apuestas y transacciones reales, verificar las plantillas con registros oficiales de DIMAYOR, completar capacidades de estadios y sustituir los fixtures ficticios cuando se publiquen las fechas y horarios oficiales.
+Errores JSON uniformes (401, 403, 404, 409, 422, 429, 502, 500). Rate limits: login 5/min por correo+IP y 30/min por IP; registro, recuperar y restablecer comparten un bucket de 5/min por IP; catálogo público 120/min; apuestas 20/min y pagos 10/min por usuario; webhook 120/min por IP. Idempotencia: `idempotency_key` (cuerpo) tiene prioridad sobre el header `Idempotency-Key`; sin ninguna se deriva una clave determinista (usuario + payload + ventana de 30 s). `DELETE /admin/mercados/{id}` suspende (no borra) y devuelve el mercado. CORS: `CORS_ALLOWED_ORIGINS` (por defecto `http://localhost:5173`).

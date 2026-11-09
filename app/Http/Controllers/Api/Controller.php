@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller as BaseController;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class Controller extends BaseController
 {
@@ -67,10 +68,8 @@ class Controller extends BaseController
         $validator = Validator::make($data, $this->validationRules);
 
         if ($validator->fails()) {
-            $tmpErrores = $validator->errors()->all();
-            $this->validateErros = $tmpErrores;
-            $this->agregarError($tmpErrores);
-            return false;
+            // El manejador global responde 422 con mensaje[] y data.errores por campo.
+            throw new ValidationException($validator);
         }
         return true;
     }

@@ -2,12 +2,13 @@
 
 namespace App\Models\Usuario;
 
-use Illuminate\Foundation\Auth\User as Authenticatable;
+use App\Models\SqlServerAuthenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Laravel\Sanctum\HasApiTokens;
 
-class Usuario extends Authenticatable
+class Usuario extends SqlServerAuthenticatable
 {
     use HasApiTokens;
     use Notifiable;
@@ -21,6 +22,8 @@ class Usuario extends Authenticatable
         'rol_codigo',
         'estado_codigo',
     ];
+
+    protected $hidden = ['remember_token'];
 
     protected function casts(): array
     {
@@ -37,9 +40,29 @@ class Usuario extends Authenticatable
         return $this->hasOne(PerfilUsuario::class, 'usuario_id', 'id_usuario');
     }
 
+    public function rol(): BelongsTo
+    {
+        return $this->belongsTo(Rol::class, 'rol_codigo', 'codigo');
+    }
+
+    public function estado(): BelongsTo
+    {
+        return $this->belongsTo(EstadoUsuario::class, 'estado_codigo', 'codigo');
+    }
+
     public function getAuthPassword(): string
     {
         return $this->credencial?->contrasena_hash ?? '';
+    }
+
+    public function estaActivo(): bool
+    {
+        return $this->estado_codigo === 'ACT';
+    }
+
+    public function tieneRol(string $codigo): bool
+    {
+        return $this->rol_codigo === $codigo;
     }
 
     public function datosPublicos(): array

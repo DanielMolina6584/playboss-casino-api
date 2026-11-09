@@ -2,10 +2,10 @@
 
 namespace App\Models\Usuario;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\SqlServerModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class PerfilUsuario extends Model
+class PerfilUsuario extends SqlServerModel
 {
     protected $table = 'usuario_perfil';
     protected $primaryKey = 'usuario_id';
@@ -32,5 +32,10 @@ class PerfilUsuario extends Model
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'usuario_id', 'id_usuario');
+    }
+
+    public function tipoDocumento(): BelongsTo
+    {
+        return $this->belongsTo(TipoDocumento::class, 'tipo_documento_codigo', 'codigo');
     }
 }

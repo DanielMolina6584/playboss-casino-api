@@ -2,10 +2,10 @@
 
 namespace App\Models\Usuario;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\SqlServerModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class CredencialUsuario extends Model
+class CredencialUsuario extends SqlServerModel
 {
     protected $table = 'usuario_credencial';
     protected $primaryKey = 'usuario_id';
