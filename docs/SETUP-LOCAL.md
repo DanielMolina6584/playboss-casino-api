@@ -130,21 +130,35 @@ php artisan serve
 php artisan playboss:demo-data
 ```
 
-Llena todas las tablas usando los flujos reales de la API: sube el logo de la liga a Drive, crea el catálogo (MySQL), mercados y reglas (MongoDB), usuarios (SQL Server), un depósito aprobado y tres apuestas —pendiente, cancelada y ganada— (PostgreSQL), y un documento resumen en Firestore (`demo_cargas`).
+Carga la **Liga BetPlay 2026-II** completa usando los flujos reales de la API (registro, webhook de pagos, `BetService`, liquidación). Tarda ~2 minutos.
+
+| Dónde | Qué queda |
+|-------|-----------|
+| Google Drive | Logo de la liga y escudo de los 20 equipos |
+| MySQL | 20 equipos con sus estadios reales, 360 jugadores (ficticios), 19 jornadas todos contra todos (190 partidos): las ya jugadas con marcador y alineaciones, las próximas abiertas para apostar; tabla de puntos |
+| MongoDB | 31 mercados por partido con cuotas calculadas (modelo de Poisson + margen de la casa), una regla de apuesta por mercado, estadísticas de cada partido jugado (`match_stats`) y auditoría |
+| SQL Server | 42 usuarios: admin, cliente principal, clientes (2 bloqueados, 1 autoexcluido, 1 menor de edad), sesiones y códigos de recuperación |
+| PostgreSQL | Cuentas, depósitos aprobados/rechazados/pendientes, ~530 apuestas simples y combinadas (hasta 6 selecciones) ganadas, perdidas, pendientes, canceladas y anuladas, retiros y todos los movimientos |
+| Firestore | `tabla_posiciones/liga-betplay-2026-II` y un resumen en `demo_cargas` |
+
+Mercados disponibles: resultado final (1X2), doble oportunidad, empate no válido, ambos marcan, total de goles 0.5–4.5, goles por equipo, par/impar, hándicap ±1, resultado al descanso, descanso/final, resultado + ambos marcan, marcador exacto, más córners, total de córners, tarjetas, tiros y tiros a puerta.
+
+Reglas que aplica la API al apostar: monto mínimo/máximo y pago máximo por mercado, edad mínima 18, máximo 10 selecciones, una selección por partido en combinadas, cuota congelada (409 si cambió), saldo suficiente y topes diarios (monto y cantidad). Las combinadas pierden con una selección perdida y las selecciones anuladas cuentan con cuota 1.
 
 | Usuario | Correo | Clave |
 |---------|--------|-------|
-| Cliente (saldo 220.000) | `cliente@playboss.test` | `Demo1234!` |
+| Cliente principal | `cliente@playboss.test` | `Demo1234!` |
 | Administrador | `admin@playboss.test` | `Demo1234!` |
+| Demás clientes | `<nombre>.<apellido><n>@playboss.test` | `Demo1234!` |
+
+**Escudos oficiales:** son marcas registradas de los clubes, por eso no están en git. Van en `storage/app/private/escudos/<equipo>.png` (API, se suben a Drive) y en `public/assets/escudos/<equipo>.png` del front. Si faltan, la API sube un escudo genérico y el front muestra las iniciales.
 
 ### Reiniciar datos
 
-Borra **todo** lo de las 4 bases locales y vuelve a cargar la demo (el logo viejo queda en Drive y el documento viejo en Firestore; bórralos a mano si quieres):
+Borra **todo** lo de las 4 bases locales, lo que la demo subió a Drive y Firestore, y vuelve a cargar (la misma `--semilla` produce los mismos datos):
 
 ```bash
-for c in sqlsrv mysql pgsql mongodb; do php artisan db:wipe --database=$c --force; done
-php artisan playboss:migrate --force
-php artisan playboss:demo-data
+php artisan playboss:demo-data --fresh
 ```
 
 ## 11. Ver las bases de datos (como phpMyAdmin)

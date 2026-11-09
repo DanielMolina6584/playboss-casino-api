@@ -7,6 +7,7 @@ use App\Models\Account\Cuenta;
 use App\Models\Account\Movimiento;
 use App\Models\Bet\Apuesta;
 use App\Models\Bet\ApuestaDetalle;
+use App\Models\Market\EstadisticaPartido;
 use App\Models\Market\Mercado;
 use App\Models\Sports\Partido;
 use App\Service\Account\AccountService;
@@ -28,9 +29,10 @@ class SettlementService
 
     /**
      * @param array<string,string> $ganadoras  override: market_id => selection_code (o 'VOID' para anular el mercado)
+     * @param array<string,int> $estadisticas  descanso, córners, tarjetas y tiros (ver MarketResolver); se guardan en Mongo
      * @return array{partido_id:int,apuestas_liquidadas:int,mercados_sin_resolver:array}
      */
-    public function liquidarPartido(int $partidoId, int $golesLocal, int $golesVisitante, array $ganadoras = [], ?int $adminId = null): array
+    public function liquidarPartido(int $partidoId, int $golesLocal, int $golesVisitante, array $ganadoras = [], ?int $adminId = null, array $estadisticas = []): array
     {
         $partido = Partido::query()->find($partidoId);
         if (!$partido) {
@@ -44,18 +46,22 @@ class SettlementService
         $partido->goles_visitante = $golesVisitante;
         $partido->estado_codigo = 'FIN';
         $partido->save();
+        $stats = $this->estadisticas($partidoId, $estadisticas);
 
         $sinResolver = [];
         foreach (Mercado::query()->where('match_id', $partidoId)->get() as $mercado) {
             $id = (string) $mercado->getKey();
-            $ganadora = $ganadoras[$id] ?? $ganadoras[$mercado->code] ?? MarketResolver::ganadora($mercado->code, $golesLocal, $golesVisitante);
-            if ($ganadora === null) {
+            $override = $ganadoras[$id] ?? $ganadoras[$mercado->code] ?? null;
+            $ganadorasMercado = $override !== null
+                ? [$override]
+                : MarketResolver::ganadoras($mercado->code, $golesLocal, $golesVisitante, $stats);
+            if ($ganadorasMercado === null) {
                 $sinResolver[] = ['market_id' => $id, 'code' => $mercado->code];
                 continue;
             }
             $mercado->status = 'SETTLED';
             $mercado->save();
-            $this->resolverDetalles($partidoId, $id, $ganadora);
+            $this->resolverDetalles($partidoId, $id, $ganadorasMercado);
         }
 
         $liquidadas = 0;
@@ -97,13 +103,39 @@ class SettlementService
         return $apuesta->load('detalles');
     }
 
-    private function resolverDetalles(int $partidoId, string $marketId, string $ganadora): void
+    /**
+     * Guarda las estadísticas recibidas o, si no llegan, usa las ya registradas del partido.
+     * @param array<string,int> $recibidas
+     * @return array<string,int>
+     */
+    private function estadisticas(int $partidoId, array $recibidas): array
     {
+        if ($recibidas !== []) {
+            EstadisticaPartido::query()->updateOrCreate(
+                ['match_id' => $partidoId],
+                array_map('intval', $recibidas) + ['updated_at' => now()]
+            );
+
+            return array_map('intval', $recibidas);
+        }
+
+        $registro = EstadisticaPartido::query()->where('match_id', $partidoId)->first();
+
+        return $registro ? array_map('intval', array_intersect_key($registro->toArray(), array_flip(EstadisticaPartido::CAMPOS))) : [];
+    }
+
+    /**
+     * Marca cada selección del mercado como GAN/PER, o ANU si el mercado se anuló.
+     * @param list<string> $ganadoras
+     */
+    private function resolverDetalles(int $partidoId, string $marketId, array $ganadoras): void
+    {
+        $anulado = $ganadoras === [MarketResolver::VOID];
         $detalles = ApuestaDetalle::query()
             ->where('partido_id_mysql', $partidoId)->where('mercado_id_mongodb', $marketId)
             ->whereNull('resultado')->get();
         foreach ($detalles as $detalle) {
-            $detalle->resultado = $ganadora === 'VOID' ? 'ANU' : ($detalle->seleccion_codigo === $ganadora ? 'GAN' : 'PER');
+            $detalle->resultado = $anulado ? 'ANU' : (in_array($detalle->seleccion_codigo, $ganadoras, true) ? 'GAN' : 'PER');
             $detalle->save();
         }
     }
