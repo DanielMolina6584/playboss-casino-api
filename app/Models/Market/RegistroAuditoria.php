@@ -9,6 +9,6 @@ class RegistroAuditoria extends MongoDocument
     protected $keyType = 'string';
     public $incrementing = false;
     protected $fillable = ['event', 'user_id', 'email_hash', 'success', 'ip', 'device', 'reason', 'context', 'created_at'];
-    protected $casts = ['user_id' => 'integer', 'success' => 'boolean', 'context' => 'array', 'created_at' => 'datetime'];
+    protected $casts = ['user_id' => 'integer', 'success' => 'boolean', 'created_at' => 'datetime'];
     public $timestamps = false;
 }

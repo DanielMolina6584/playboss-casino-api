@@ -45,7 +45,7 @@ class AppServiceProvider extends ServiceProvider
                 'FIREBASE_CREDENTIALS'
             );
             $client = new GoogleClient();
-            $client->setHttpClient(new HttpClient(['timeout' => 60, 'connect_timeout' => 10]));
+            $client->setHttpClient(new HttpClient(['timeout' => 25, 'connect_timeout' => 10]));
             $client->setAuthConfig($credentialsPath);
             $client->addScope(Firestore::DATASTORE);
 
@@ -59,7 +59,7 @@ class AppServiceProvider extends ServiceProvider
             );
 
             $client = new GoogleClient();
-            $client->setHttpClient(new HttpClient(['timeout' => 60, 'connect_timeout' => 10]));
+            $client->setHttpClient(new HttpClient(['timeout' => 25, 'connect_timeout' => 10]));
             $client->setAuthConfig($credentialsPath);
             // DRIVE_FILE solo ve archivos creados por la app; la carpeta destino se comparte desde otra cuenta.
             $client->addScope(Drive::DRIVE);

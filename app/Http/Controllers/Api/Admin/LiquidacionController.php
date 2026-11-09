@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Api\Concerns\RespondsJson;
 use App\Http\Requests\LiquidarPartidoRequest;
+use App\Models\Market\EstadisticaPartido;
 use App\Service\Bet\SettlementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +25,8 @@ class LiquidacionController extends Controller
             (int) $r->input('goles_local'),
             (int) $r->input('goles_visitante'),
             (array) $r->input('ganadoras', []),
-            (int) $r->user()->getAuthIdentifier()
+            (int) $r->user()->getAuthIdentifier(),
+            array_intersect_key((array) $r->input('estadisticas', []), array_flip(EstadisticaPartido::CAMPOS))
         );
 
         return $this->ok($resultado);

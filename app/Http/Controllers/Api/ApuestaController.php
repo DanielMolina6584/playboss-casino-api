@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Concerns\RespondsJson;
 use App\Http\Requests\CrearApuestaRequest;
 use App\Http\Requests\ListadoRequest;
 use App\Models\Bet\Apuesta;
+use App\Models\Market\Mercado;
 use App\Service\Bet\BetService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
@@ -65,6 +66,8 @@ class ApuestaController extends Controller
 
     private function presentar(Apuesta $a): array
     {
+        $mercados = $this->mercados($a);
+
         return [
             'id' => $a->id_apuesta,
             'tipo' => $a->detalles->count() === 1 ? 'SIMPLE' : 'COMBINADA',
@@ -77,11 +80,28 @@ class ApuestaController extends Controller
             'selecciones' => $a->detalles->map(fn ($d) => [
                 'partido_id' => $d->partido_id_mysql,
                 'market_id' => $d->mercado_id_mongodb,
+                'mercado_codigo' => $mercados[$d->mercado_id_mongodb]['code'] ?? null,
+                'mercado' => $mercados[$d->mercado_id_mongodb]['name'] ?? null,
                 'selection_code' => $d->seleccion_codigo,
                 'etiqueta' => $d->seleccion_etiqueta,
                 'cuota' => $d->cuota_congelada,
                 'resultado' => $d->resultado,
             ])->values(),
         ];
+    }
+
+    /**
+     * Código y nombre de los mercados (Mongo) de las selecciones de una apuesta.
+     * @return array<string,array{code:string,name:string}>
+     */
+    private function mercados(Apuesta $a): array
+    {
+        $resultado = [];
+        $ids = $a->detalles->pluck('mercado_id_mongodb')->unique()->values()->all();
+        foreach (Mercado::query()->whereIn('_id', $ids)->get(['_id', 'code', 'name']) as $mercado) {
+            $resultado[(string) $mercado->getKey()] = ['code' => (string) $mercado->code, 'name' => (string) $mercado->name];
+        }
+
+        return $resultado;
     }
 }
