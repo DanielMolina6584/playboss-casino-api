@@ -5,12 +5,17 @@ namespace App\Service;
 use App\Models\Usuario\Usuario;
 use App\Models\Usuario\CredencialUsuario;
 use App\Models\Usuario\PerfilUsuario;
+use App\Service\Storage\AuditLogService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
 class SvcUsuario
 {
+    public function __construct(private readonly AuditLogService $auditLogs)
+    {
+    }
+
     /**
      * Rol y estado por defecto asignados a un usuario que se auto-registra.
      */
@@ -25,7 +30,7 @@ class SvcUsuario
     public function registrar(array $datos): ?Usuario
     {
         try {
-            return DB::transaction(function () use ($datos): Usuario {
+            return DB::connection('sqlsrv')->transaction(function () use ($datos): Usuario {
                 $usuario = new Usuario();
                 $usuario->fill([
                     'rol_codigo' => $datos['rol_codigo'] ?? self::ROL_DEFECTO,
@@ -97,7 +102,7 @@ class SvcUsuario
     {
         $usuario = $this->buscarPorCorreo($correo);
 
-        if (!$usuario || !$this->verificarContrasena($usuario, $contrasena)) {
+        if (!$usuario || !$usuario->estaActivo() || !$this->verificarContrasena($usuario, $contrasena)) {
             return null;
         }
 
@@ -105,9 +110,8 @@ class SvcUsuario
     }
 
     /**
-     * Registra un intento de acceso en la tabla "logs" (auditoría de sesiones).
-     * Solo se registra cuando existe un usuario_id válido, ya que la tabla
-     * exige la relación con "usuario".
+     * Registra un intento de acceso en la colección MongoDB "audit_logs".
+     * Para intentos desconocidos se guarda solo un hash del correo, nunca el texto.
      * @param int $usuarioId
      * @param bool $exitoso
      * @param string $ip
@@ -117,25 +121,22 @@ class SvcUsuario
      * @return void
      */
     public function registrarIntentoLogin(
-        int $usuarioId,
+        ?int $usuarioId,
         bool $exitoso,
         string $ip,
         ?string $dispositivo = null,
         ?string $motivoFallo = null,
-        ?int $tokenId = null
+        ?int $tokenId = null,
+        ?string $correo = null
     ): void {
-        try {
-            DB::table('logs')->insert([
-                'usuario_id'                => $usuarioId,
-                'fecha_hora'                => now(),
-                'ip_origen'                 => $ip,
-                'dispositivo'               => $dispositivo,
-                'exitoso'                   => $exitoso,
-                'motivo_fallo'              => $motivoFallo,
-                'personal_access_token_id'  => $tokenId,
-            ]);
-        } catch (\Exception $err) {
-            Log::channel('single')->error('SvcUsuario::registrarIntentoLogin - ' . $err->getMessage());
-        }
+        $this->auditLogs->registrarAutenticacion(
+            $usuarioId,
+            $correo,
+            $exitoso,
+            $ip,
+            $dispositivo,
+            $motivoFallo,
+            $tokenId
+        );
     }
 }

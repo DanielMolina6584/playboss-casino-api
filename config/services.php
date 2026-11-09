@@ -47,4 +47,23 @@ return [
         'shared_drive_id' => env('GOOGLE_DRIVE_SHARED_DRIVE_ID'),
     ],
 
+    // Wompi Colombia. Sandbox: llaves pub_test_/prv_test_ y https://sandbox.wompi.co/v1
+    'wompi' => [
+        'public_key' => env('WOMPI_PUBLIC_KEY'),
+        'private_key' => env('WOMPI_PRIVATE_KEY'),
+        'events_secret' => env('WOMPI_EVENTS_SECRET'),
+        'integrity_secret' => env('WOMPI_INTEGRITY_SECRET'),
+        'base_url' => env('WOMPI_BASE_URL', 'https://sandbox.wompi.co/v1'),
+        'redirect_url' => env('WOMPI_REDIRECT_URL'),
+        'checkout_url' => env('WOMPI_CHECKOUT_URL', 'https://checkout.wompi.co/p/'),
+    ],
+
+    'payment_gateway' => [
+        'driver' => env('PAYMENT_GATEWAY_DRIVER', 'firebase_function'),
+        'method_code' => env('PAYMENT_METHOD_CODE', env('PAYMENT_GATEWAY_DRIVER', 'firebase_function') === 'wompi' ? 'WOMPI' : 'FIREBASE'),
+        'firebase_function_url' => env('FIREBASE_PAYMENT_FUNCTION_URL'),
+        'firebase_function_token' => env('FIREBASE_PAYMENT_FUNCTION_TOKEN'),
+        'minimum_amount_minor' => (int) env('PAYMENT_MINIMUM_AMOUNT_MINOR', 100),
+    ],
+
 ];
