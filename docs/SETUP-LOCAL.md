@@ -124,9 +124,49 @@ php artisan serve
 - API: http://localhost:8000/api
 - Swagger: http://localhost:8000/api/documentation
 
-## 10. Crear un usuario administrador
+## 10. Cargar datos de prueba
 
-No hay seeder de admin. Regístrate normal (`POST /api/auth/registro` o desde el front) y luego promuévelo:
+```bash
+php artisan playboss:demo-data
+```
+
+Llena todas las tablas usando los flujos reales de la API: sube el logo de la liga a Drive, crea el catálogo (MySQL), mercados y reglas (MongoDB), usuarios (SQL Server), un depósito aprobado y tres apuestas —pendiente, cancelada y ganada— (PostgreSQL), y un documento resumen en Firestore (`demo_cargas`).
+
+| Usuario | Correo | Clave |
+|---------|--------|-------|
+| Cliente (saldo 220.000) | `cliente@playboss.test` | `Demo1234!` |
+| Administrador | `admin@playboss.test` | `Demo1234!` |
+
+### Reiniciar datos
+
+Borra **todo** lo de las 4 bases locales y vuelve a cargar la demo (el logo viejo queda en Drive y el documento viejo en Firestore; bórralos a mano si quieres):
+
+```bash
+for c in sqlsrv mysql pgsql mongodb; do php artisan db:wipe --database=$c --force; done
+php artisan playboss:migrate --force
+php artisan playboss:demo-data
+```
+
+## 11. Ver las bases de datos (como phpMyAdmin)
+
+`docker compose up -d` también levanta dos visores web. Ábrelos en el navegador de Windows:
+
+**Adminer — MySQL, PostgreSQL y SQL Server:** http://localhost:8080
+
+| Motor (campo *Sistema*) | Servidor | Usuario | Contraseña | Base de datos |
+|-------------------------|----------|---------|------------|---------------|
+| MySQL | `127.0.0.1` | `playboss` | `PlayBoss_Local2026` | `dev_playboss` |
+| PostgreSQL | `127.0.0.1` | `playboss` | `PlayBoss_Local2026` | `playboss` |
+| MS SQL | `127.0.0.1` | `sa` | `PlayBoss_Local2026` | `playboss` |
+
+**mongo-express — MongoDB:** http://localhost:8081 → base `playboss` → colecciones `markets`, `bet_rules`, `audit_logs`.
+
+**Firestore:** https://console.firebase.google.com → proyecto `playboss-7d872` → Firestore Database.
+**Drive:** la carpeta compartida en https://drive.google.com.
+
+## 12. Crear otro usuario administrador
+
+Regístrate normal (`POST /api/auth/registro` o desde el front) y luego promuévelo:
 
 ```bash
 docker exec -it playboss-sqlserver /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'PlayBoss_Local2026' -d playboss \

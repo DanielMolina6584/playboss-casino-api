@@ -121,4 +121,6 @@ docker exec -it playboss-postgres psql -U playboss -d playboss -c "\dt"
 docker exec -it playboss-mongodb mongosh -u playboss -p PlayBoss_Local2026 --authenticationDatabase admin playboss --eval "show collections"
 ```
 
-Gráfico: **DBeaver** (gratis) se conecta a los 4 motores desde Windows con `localhost` y los datos de la tabla de [SETUP-LOCAL.md](SETUP-LOCAL.md) (en SQL Server marcar *Trust server certificate*; en MongoDB usar la URI). Firestore se muestra en la consola de Firebase y Drive en la carpeta compartida.
+Gráfico (navegador): **Adminer** en http://localhost:8080 para MySQL, PostgreSQL y SQL Server, y **mongo-express** en http://localhost:8081 para MongoDB (datos de acceso en la sección 11 de [SETUP-LOCAL.md](SETUP-LOCAL.md)). Los datos de prueba se cargan con `php artisan playboss:demo-data`.
+
+Alternativa de escritorio: **DBeaver** (gratis) se conecta a los 4 motores desde Windows con `localhost` y los datos de la tabla de [SETUP-LOCAL.md](SETUP-LOCAL.md) (en SQL Server marcar *Trust server certificate*; en MongoDB usar la URI). Firestore se muestra en la consola de Firebase y Drive en la carpeta compartida.

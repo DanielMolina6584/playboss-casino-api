@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Google\Client as GoogleClient;
+use GuzzleHttp\Client as HttpClient;
 use Google\Service\Drive;
 use Google\Service\Firestore;
 use App\Contracts\PaymentGateway;
@@ -44,6 +45,7 @@ class AppServiceProvider extends ServiceProvider
                 'FIREBASE_CREDENTIALS'
             );
             $client = new GoogleClient();
+            $client->setHttpClient(new HttpClient(['timeout' => 60, 'connect_timeout' => 10]));
             $client->setAuthConfig($credentialsPath);
             $client->addScope(Firestore::DATASTORE);
 
@@ -57,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
             );
 
             $client = new GoogleClient();
+            $client->setHttpClient(new HttpClient(['timeout' => 60, 'connect_timeout' => 10]));
             $client->setAuthConfig($credentialsPath);
             // DRIVE_FILE solo ve archivos creados por la app; la carpeta destino se comparte desde otra cuenta.
             $client->addScope(Drive::DRIVE);
