@@ -65,6 +65,20 @@ class SvcUsuario
     }
 
     /**
+     * Elimina un usuario recién creado (credencial y perfil se borran en cascada).
+     * @param int $usuarioId
+     * @return void
+     */
+    public function eliminar(int $usuarioId): void
+    {
+        try {
+            Usuario::whereKey($usuarioId)->delete();
+        } catch (\Exception $err) {
+            Log::channel('single')->error('SvcUsuario::eliminar - ' . $err->getMessage());
+        }
+    }
+
+    /**
      * Busca un usuario por correo, sin validar credenciales.
      * @param string $correo
      * @return Usuario|null

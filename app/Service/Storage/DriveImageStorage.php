@@ -45,6 +45,22 @@ class DriveImageStorage
         ];
     }
 
+    /**
+     * Descarga el contenido de un archivo de Drive.
+     * @return array{contenido:string,mime_type:string}
+     */
+    public function descargar(string $fileId): array
+    {
+        $options = config('services.google_drive.shared_drive_id') ? ['supportsAllDrives' => true] : [];
+        $meta = $this->drive->files->get($fileId, $options + ['fields' => 'mimeType']);
+        $respuesta = $this->drive->files->get($fileId, $options + ['alt' => 'media']);
+
+        return [
+            'contenido' => (string) $respuesta->getBody(),
+            'mime_type' => $meta->mimeType ?: 'application/octet-stream',
+        ];
+    }
+
     public function eliminar(string $fileId): void
     {
         $options = config('services.google_drive.shared_drive_id') ? ['supportsAllDrives' => true] : [];

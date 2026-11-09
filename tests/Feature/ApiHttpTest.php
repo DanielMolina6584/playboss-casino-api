@@ -150,4 +150,15 @@ class ApiHttpTest extends TestCase
             'Origin' => 'http://localhost:5173', 'Access-Control-Request-Method' => 'GET',
         ])->assertHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
     }
+
+    public function test_registro_y_cambio_de_foto_exigen_una_imagen(): void
+    {
+        $this->postJson('/api/auth/registro', ['primer_nombre' => 'Laura'])
+            ->assertStatus(422)->assertJsonValidationErrorFor('foto', 'data.errores');
+
+        $this->actuar();
+        $this->postJson('/api/perfil/foto', [])->assertStatus(422);
+        $this->post('/api/perfil/foto', ['foto' => \Illuminate\Http\UploadedFile::fake()->create('cv.pdf', 10, 'application/pdf')], ['Accept' => 'application/json'])
+            ->assertStatus(422);
+    }
 }
