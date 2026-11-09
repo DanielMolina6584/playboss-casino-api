@@ -1,0 +1,114 @@
+# Bases de datos locales de PlayBoss (solo desarrollo).
+# Levantar:  docker compose up -d --wait                    (PostgreSQL, SQL Server, MongoDB)
+#            docker compose --profile mysql up -d --wait    (+ MySQL, si no tienes MySQL/MariaDB instalado)
+# Apagar:    docker compose down        (conserva los datos)
+# Reset:     docker compose down -v     (BORRA los datos)
+#
+# Las credenciales coinciden con .env.docker.example. No usar en producción.
+
+name: playboss
+
+services:
+  # Opcional: solo si el equipo no tiene MySQL/MariaDB propio en el puerto 3306.
+  mysql:
+    image: mysql:8.4
+    container_name: playboss-mysql
+    profiles: ["mysql"]
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: PlayBoss_Local2026
+      MYSQL_DATABASE: dev_playboss
+      MYSQL_USER: playboss
+      MYSQL_PASSWORD: PlayBoss_Local2026
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pPlayBoss_Local2026"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  postgres:
+    image: postgres:16
+    container_name: playboss-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: playboss
+      POSTGRES_USER: playboss
+      POSTGRES_PASSWORD: PlayBoss_Local2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U playboss -d playboss"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mongodb:
+    image: mongo:7
+    container_name: playboss-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: playboss
+      MONGO_INITDB_ROOT_PASSWORD: PlayBoss_Local2026
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: playboss-sqlserver
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      # SQL Server exige mayúscula, minúscula, número y símbolo.
+      MSSQL_SA_PASSWORD: PlayBoss_Local2026
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # SQL Server no crea la base sola: este contenedor corre una vez y termina.
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: playboss-sqlserver-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - /opt/mssql-tools18/bin/sqlcmd
+      - -C
+      - -S
+      - sqlserver
+      - -U
+      - sa
+      - -P
+      - PlayBoss_Local2026
+      - -b
+      - -Q
+      - "IF DB_ID('playboss') IS NULL CREATE DATABASE playboss;"
+
+volumes:
+  mysql_data:
+  postgres_data:
+  mongodb_data:
+  sqlserver_data:
