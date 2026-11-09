@@ -4,7 +4,7 @@ namespace App\Models\Market;
 
 class Mercado extends MongoDocument
 {
-    protected $collection = 'markets';
+    protected $table = 'markets';
     protected $primaryKey = '_id';
     protected $keyType = 'string';
     public $incrementing = false;

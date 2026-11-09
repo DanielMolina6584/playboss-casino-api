@@ -4,7 +4,7 @@ namespace App\Models\Market;
 
 class ReglaApuesta extends MongoDocument
 {
-    protected $collection = 'bet_rules';
+    protected $table = 'bet_rules';
     protected $primaryKey = '_id';
     protected $keyType = 'string';
     public $incrementing = false;

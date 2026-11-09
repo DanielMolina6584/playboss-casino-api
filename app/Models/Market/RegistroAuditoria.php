@@ -4,7 +4,7 @@ namespace App\Models\Market;
 
 class RegistroAuditoria extends MongoDocument
 {
-    protected $collection = 'audit_logs';
+    protected $table = 'audit_logs';
     protected $primaryKey = '_id';
     protected $keyType = 'string';
     public $incrementing = false;
