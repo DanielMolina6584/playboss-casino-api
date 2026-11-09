@@ -51,10 +51,34 @@ class GenerarTokenDriveCommand extends Command
             return self::FAILURE;
         }
 
-        $this->components->info('Autorizado. Agrega esta línea a tu .env:');
-        $this->line('GOOGLE_DRIVE_REFRESH_TOKEN=' . $token['refresh_token']);
+        $linea = 'GOOGLE_DRIVE_REFRESH_TOKEN=' . $token['refresh_token'];
+        if ($this->guardarEnEnv($linea)) {
+            $this->components->info('Autorizado. GOOGLE_DRIVE_REFRESH_TOKEN quedó guardado en .env.');
+        } else {
+            $this->components->info('Autorizado. Agrega esta línea a tu .env:');
+            $this->line($linea);
+        }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Reemplaza o agrega GOOGLE_DRIVE_REFRESH_TOKEN en el .env; false si no se puede escribir.
+     */
+    private function guardarEnEnv(string $linea): bool
+    {
+        $envPath = base_path('.env');
+        if (!is_file($envPath) || !is_writable($envPath)) {
+            return false;
+        }
+
+        $contenido = (string) file_get_contents($envPath);
+        $patron = '/^GOOGLE_DRIVE_REFRESH_TOKEN=.*$/m';
+        $contenido = preg_match($patron, $contenido) === 1
+            ? (string) preg_replace($patron, $linea, $contenido)
+            : rtrim($contenido) . PHP_EOL . $linea . PHP_EOL;
+
+        return file_put_contents($envPath, $contenido) !== false;
     }
 
     /**
