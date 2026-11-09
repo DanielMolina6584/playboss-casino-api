@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Service\SvcFotoPerfil;
 use App\Service\SvcUsuario;
 use App\Models\Usuario\CredencialUsuario;
 use App\Models\Usuario\PerfilUsuario;
@@ -11,13 +12,15 @@ use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly SvcUsuario $svcUsuario)
-    {
+    public function __construct(
+        private readonly SvcUsuario $svcUsuario,
+        private readonly SvcFotoPerfil $svcFotoPerfil
+    ) {
         parent::__construct();
     }
 
     /**
-     * Registra un nuevo usuario y retorna un token de acceso.
+     * Registra un nuevo usuario con su foto de perfil (se guarda en Google Drive) y retorna un token de acceso.
      */
     public function registro(): JsonResponse
     {
@@ -41,6 +44,7 @@ class AuthController extends Controller
             'celular'               => ['nullable', 'string', 'max:20', 'regex:/^[0-9+\s\-]{7,20}$/'],
             'fecha_nacimiento'      => 'required|date',
             'contrasena'            => 'required|string|min:8|confirmed',
+            'foto'                  => ['required', ...SvcFotoPerfil::REGLAS],
         ]);
 
         if (!$this->validateRequestRules()) {
@@ -52,6 +56,12 @@ class AuthController extends Controller
         if (!$usuario) {
             $this->agregarError('No fue posible registrar el usuario.');
             return $this->sendResponse(500);
+        }
+
+        if (!$this->svcFotoPerfil->guardar($usuario->id_usuario, $this->request->file('foto'))) {
+            $this->svcUsuario->eliminar($usuario->id_usuario);
+            $this->agregarError('No pudimos guardar tu foto de perfil. Intenta de nuevo.');
+            return $this->sendResponse(502);
         }
 
         $nuevoToken = $usuario->createToken('playboss-api');
@@ -66,7 +76,7 @@ class AuthController extends Controller
             $this->getDataBody('correo')
         );
 
-        $this->setDataResponse($usuario->datosPublicos(), 'usuario');
+        $this->setDataResponse($usuario->fresh()->datosPublicos(), 'usuario');
         $this->setDataResponse($nuevoToken->plainTextToken, 'token');
         $this->respSinError();
         return $this->sendResponse(201);
