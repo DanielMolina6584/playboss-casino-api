@@ -91,7 +91,7 @@ Hay dos modos según dónde esté la carpeta. El ID de la carpeta es lo que va d
    php artisan playboss:drive-token
    ```
    Google mostrará *"Google no verificó esta app"*: **Configuración avanzada → Ir a PlayBoss**. Al final el navegador cae en una página de error de `localhost`: copia esa URL completa y pégala en la terminal.
-8. Copia en `.env` la línea `GOOGLE_DRIVE_REFRESH_TOKEN=...` que imprime el comando.
+8. El comando guarda `GOOGLE_DRIVE_REFRESH_TOKEN` en `.env` automáticamente.
 
 ### 6B. Unidad compartida de Google Workspace (cuenta de servicio)
 
