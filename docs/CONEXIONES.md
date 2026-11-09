@@ -96,7 +96,9 @@ php artisan db:table usuario --database=sqlsrv    # detalle de una tabla
 
 ### Paso 4 — Un flujo que toca varios motores
 
-1. `POST /api/auth/registro` → crea el usuario en **SQL Server** y deja un registro en `audit_logs` de **MongoDB**.
+1. `POST /api/auth/registro` (con la foto de perfil) → sube la foto a **Google Drive**, crea el usuario en **SQL Server** con el id de la foto en `usuario_perfil.foto_drive_id` y deja un registro en `audit_logs` de **MongoDB**.
+   - Cambiar la foto: `POST /api/perfil/foto` (sube la nueva a Drive y borra la anterior). Verla: `GET /api/perfil/foto` (la API la lee de Drive).
+   - En la app: registrarse en `/registro` (pide la foto) o cambiarla en `/perfil`. Los archivos aparecen en la carpeta *Playboss* de Drive como `perfil-<id_usuario>-<fecha>.<ext>`.
 2. `GET /api/partidos` → lee de **MySQL**.
 3. `GET /api/partidos/{id}/mercados` → lee cuotas de **MongoDB**.
 4. `POST /api/apuestas` → valida en MySQL + MongoDB y guarda apuesta y movimiento de saldo en **PostgreSQL**.

@@ -51,6 +51,8 @@ Route::middleware(['auth:sanctum', EnsureUsuarioActivo::class])->group(function 
     Route::get('/perfil', [PerfilController::class, 'show']);
     Route::put('/perfil', [PerfilController::class, 'update']);
     Route::put('/perfil/contrasena', [PerfilController::class, 'cambiarContrasena']);
+    Route::get('/perfil/foto', [PerfilController::class, 'foto']);
+    Route::post('/perfil/foto', [PerfilController::class, 'subirFoto'])->middleware('throttle:10,1');
 
     Route::get('/cuenta', [CuentaController::class, 'show']);
     Route::get('/cuenta/movimientos', [CuentaController::class, 'movimientos']);

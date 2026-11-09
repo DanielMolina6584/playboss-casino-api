@@ -98,13 +98,14 @@ $paths = [];
 // ---- Auth
 $paths['/auth/registro'] = ['post' => [
     'tags' => ['Auth'], 'operationId' => 'authRegistro', 'summary' => 'Registrar usuario',
-    'description' => "Crea un usuario con rol `CLIENTE` y devuelve su token Bearer (Sanctum). Debe ser mayor de edad al apostar (se valida luego en `POST /apuestas`, no aquí). La combinación `tipo_documento_codigo` + `numero_documento` y el `correo` deben ser únicos.\n\nLos errores 422 traen los textos en `mensaje[]` y el detalle por campo en `data.errores`. `celular` (opcional) debe cumplir `^[0-9+\\s\\-]{7,20}$`, igual que en `PUT /perfil`.{$limites}5 solicitudes/min por IP (bucket `recuperacion`, compartido con `/auth/recuperar` y `/auth/restablecer`).",
+    'description' => "Crea un usuario con rol `CLIENTE` y devuelve su token Bearer (Sanctum). Debe ser mayor de edad al apostar (se valida luego en `POST /apuestas`, no aquí). La combinación `tipo_documento_codigo` + `numero_documento` y el `correo` deben ser únicos.\n\nSe envía como `multipart/form-data` porque exige la **foto de perfil** (`foto`: jpg, png o webp, máx. 3 MB). La foto se sube a Google Drive y su id queda en `usuario_perfil.foto_drive_id`; si Drive falla, el usuario no se crea y se responde 502.\n\nLos errores 422 traen los textos en `mensaje[]` y el detalle por campo en `data.errores`. `celular` (opcional) debe cumplir `^[0-9+\\s\\-]{7,20}$`, igual que en `PUT /perfil`.{$limites}5 solicitudes/min por IP (bucket `recuperacion`, compartido con `/auth/recuperar` y `/auth/restablecer`).",
     'security' => [],
-    'requestBody' => $bodyJson('RegistroRequest', ['primer_nombre' => 'Laura', 'segundo_nombre' => null, 'primer_apellido' => 'Gómez', 'segundo_apellido' => 'Pérez', 'tipo_documento_codigo' => 'CC', 'numero_documento' => '1020304050', 'correo' => 'laura@example.com', 'celular' => '3001234567', 'fecha_nacimiento' => '1995-04-12', 'contrasena' => 'Clave-segura-1', 'contrasena_confirmation' => 'Clave-segura-1']),
+    'requestBody' => ['required' => true, 'content' => ['multipart/form-data' => ['schema' => $ref('RegistroRequest')]]],
     'responses' => [
         '201' => $ok('Usuario creado.', $obj(['usuario' => $ref('Usuario'), 'token' => $str('12|aBcD...', ['description' => 'Token Bearer en texto plano (se muestra una sola vez).'])], ['usuario', 'token']), ['usuario' => $usuarioEj, 'token' => '12|k3Yx9QpL0aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567']),
         '422' => $errEx('Validación fallida (campos faltantes, correo/documento duplicado, contraseña sin confirmar...).', ['El correo ya está registrado.', 'La contraseña debe tener al menos 8 caracteres.'], ['errores' => ['correo' => ['El correo ya está registrado.'], 'contrasena' => ['La contraseña debe tener al menos 8 caracteres.']]]),
         '429' => $e429, '500' => $errEx('No fue posible registrar el usuario.', ['No fue posible registrar el usuario.']),
+        '502' => $errEx('No se pudo subir la foto a Google Drive (el usuario no se crea).', ['No pudimos guardar tu foto de perfil. Intenta de nuevo.']),
     ],
 ]];
 $paths['/auth/login'] = ['post' => [
@@ -193,6 +194,22 @@ $paths['/perfil'] = [
         'security' => $sec,
         'requestBody' => $bodyJson('ActualizarPerfilRequest', ['primer_nombre' => 'Laura', 'segundo_apellido' => 'Pérez', 'celular' => '+57 300 123 4567']),
         'responses' => ['200' => $ok('Perfil actualizado.', $obj(['usuario' => $ref('Usuario')], ['usuario']), ['usuario' => $usuarioEj]), '422' => $e422] + $authErr],
+];
+$paths['/perfil/foto'] = [
+    'get' => ['tags' => ['Perfil'], 'operationId' => 'perfilFoto', 'summary' => 'Ver mi foto de perfil',
+        'description' => 'Devuelve la imagen (bytes) leída desde Google Drive. 404 si el usuario no tiene foto.', 'security' => $sec,
+        'responses' => [
+            '200' => ['description' => 'Imagen.', 'content' => ['image/*' => ['schema' => ['type' => 'string', 'format' => 'binary']]]],
+            '404' => $errEx('Sin foto.', ['No tienes foto de perfil.']),
+        ] + $authErr],
+    'post' => ['tags' => ['Perfil'], 'operationId' => 'perfilSubirFoto', 'summary' => 'Cambiar mi foto de perfil',
+        'description' => 'Sube la nueva foto a Google Drive (carpeta `GOOGLE_DRIVE_FOLDER_ID`), guarda su id en `usuario_perfil.foto_drive_id` y borra la anterior. jpg, png o webp de máx. 3 MB. 10 solicitudes/min.', 'security' => $sec,
+        'requestBody' => ['required' => true, 'content' => ['multipart/form-data' => ['schema' => $obj(['foto' => ['type' => 'string', 'format' => 'binary']], ['foto'])]]],
+        'responses' => [
+            '200' => $ok('Foto actualizada.', $obj(['usuario' => $ref('Usuario')], ['usuario']), ['usuario' => $usuarioEj], ['Foto de perfil actualizada.']),
+            '422' => $e422,
+            '502' => $errEx('No se pudo subir a Google Drive.', ['No pudimos guardar tu foto de perfil. Intenta de nuevo.']),
+        ] + $authErr],
 ];
 $paths['/perfil/contrasena'] = ['put' => [
     'tags' => ['Perfil'], 'operationId' => 'perfilContrasena', 'summary' => 'Cambiar mi contraseña',
@@ -388,6 +405,7 @@ $schemas = [
         'fecha_registro' => $fecha, 'primer_nombre' => $str('Laura'), 'segundo_nombre' => $nullable($str()), 'primer_apellido' => $str('Gómez'), 'segundo_apellido' => $nullable($str()),
         'tipo_documento_codigo' => $str('CC'), 'numero_documento' => $str('1020304050'), 'celular' => $nullable($str('3001234567')),
         'fecha_nacimiento' => ['type' => 'string', 'format' => 'date', 'example' => '1995-04-12'], 'correo' => ['type' => 'string', 'format' => 'email', 'example' => 'laura@example.com'],
+        'foto_drive_id' => $nullable($str('1AbCdEfGhIjKlMnOp', ['description' => 'Id de la foto en Google Drive; la imagen se obtiene con `GET /perfil/foto`.'])),
     ], ['id_usuario', 'rol_codigo', 'estado_codigo', 'correo']),
     'RegistroRequest' => $obj([
         'primer_nombre' => $str('Laura', ['maxLength' => 50]), 'segundo_nombre' => $nullable($str('', ['maxLength' => 50])),
@@ -399,7 +417,8 @@ $schemas = [
         'fecha_nacimiento' => ['type' => 'string', 'format' => 'date', 'example' => '1995-04-12'],
         'contrasena' => ['type' => 'string', 'format' => 'password', 'minLength' => 8, 'example' => 'Clave-segura-1'],
         'contrasena_confirmation' => ['type' => 'string', 'format' => 'password', 'description' => 'Debe ser igual a `contrasena`.', 'example' => 'Clave-segura-1'],
-    ], ['primer_nombre', 'primer_apellido', 'tipo_documento_codigo', 'numero_documento', 'correo', 'fecha_nacimiento', 'contrasena', 'contrasena_confirmation']),
+        'foto' => ['type' => 'string', 'format' => 'binary', 'description' => 'Foto de perfil (jpg, png o webp, máx. 3 MB). Se guarda en Google Drive.'],
+    ], ['primer_nombre', 'primer_apellido', 'tipo_documento_codigo', 'numero_documento', 'correo', 'fecha_nacimiento', 'contrasena', 'contrasena_confirmation', 'foto']),
     'LoginRequest' => $obj(['correo' => ['type' => 'string', 'format' => 'email', 'example' => 'laura@example.com'], 'contrasena' => ['type' => 'string', 'format' => 'password', 'example' => 'Clave-segura-1']], ['correo', 'contrasena']),
     'RecuperarRequest' => $obj(['correo' => ['type' => 'string', 'format' => 'email', 'maxLength' => 120, 'example' => 'laura@example.com']], ['correo']),
     'RestablecerRequest' => $obj([
