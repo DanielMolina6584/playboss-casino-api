@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Google\Client as GoogleClient;
+use GuzzleHttp\Client as HttpClient;
 use Google\Service\Drive;
 use Google\Service\Firestore;
 use App\Contracts\PaymentGateway;
@@ -44,6 +45,7 @@ class AppServiceProvider extends ServiceProvider
                 'FIREBASE_CREDENTIALS'
             );
             $client = new GoogleClient();
+            $client->setHttpClient(new HttpClient(['timeout' => 25, 'connect_timeout' => 10]));
             $client->setAuthConfig($credentialsPath);
             $client->addScope(Firestore::DATASTORE);
 
@@ -57,8 +59,22 @@ class AppServiceProvider extends ServiceProvider
             );
 
             $client = new GoogleClient();
+            $client->setHttpClient(new HttpClient(['timeout' => 25, 'connect_timeout' => 10]));
             $client->setAuthConfig($credentialsPath);
-            $client->addScope(Drive::DRIVE_FILE);
+            // DRIVE_FILE solo ve archivos creados por la app; la carpeta destino se comparte desde otra cuenta.
+            $client->addScope(Drive::DRIVE);
+
+            // Modo OAuth (Gmail personal): las cuentas de servicio no tienen cuota en "Mi unidad".
+            $refreshToken = config('services.google_drive.refresh_token');
+            if (is_string($refreshToken) && $refreshToken !== '') {
+                $token = $client->fetchAccessTokenWithRefreshToken($refreshToken);
+                if (isset($token['error'])) {
+                    throw new RuntimeException(
+                        'Google Drive rechazó GOOGLE_DRIVE_REFRESH_TOKEN (' . $token['error']
+                        . '). Genera uno nuevo con php artisan playboss:drive-token.'
+                    );
+                }
+            }
 
             return new Drive($client);
         });

@@ -354,9 +354,9 @@ $paths['/admin/mercados/{id}'] = [
 ];
 $paths['/admin/partidos/{id}/liquidar'] = ['post' => [
     'tags' => [$adminTag], 'operationId' => 'adminPartidoLiquidar', 'summary' => 'Liquidar un partido',
-    'description' => "Solo rol `ADMIN`. Marca el partido `FIN` con el marcador, determina la opción ganadora de los mercados estándar (`1X2`, `BTTS`, `OU_<n>_<d>`, p. ej. `OU_2_5`) y guarda el resultado por selección. Para otros mercados (o líneas enteras) indica `ganadoras: {\"<market_id o code>\": \"<opción>\" | \"VOID\"}`; los no resueltos quedan pendientes (`mercados_sin_resolver`). Una apuesta pierde apenas una selección pierde; gana cuando todas ganan (anuladas cuentan con cuota 1). Cada cierre libera lo retenido y abona el premio con referencia única `liquidacion:apuesta:{id}`: repetir la llamada con el mismo marcador no paga dos veces; con otro marcador responde 409.",
+    'description' => "Solo rol `ADMIN`. Marca el partido `FIN` con el marcador, determina las opciones ganadoras de los mercados estándar y guarda el resultado por selección. Por marcador: `1X2`, `DC` (doble oportunidad), `DNB` (empate no válido: el empate anula), `BTTS`, `ODD_EVEN`, `CS` (marcador exacto), `HCP_M1`/`HCP_P1` (hándicap local -1/+1), `RES_BTTS`, `OU_<n>_<d>`, `HOME_OU_<n>_<d>`, `AWAY_OU_<n>_<d>`. Con `estadisticas`: `HT_1X2`, `HTFT`, `CORNERS_1X2`, `CORNERS_OU_*`, `CARDS_OU_*`, `SHOTS_OU_*`, `SOT_OU_*` (las estadísticas se guardan en Mongo `match_stats`). Para otros mercados (o líneas enteras) indica `ganadoras: {\"<market_id o code>\": \"<opción>\" | \"VOID\"}`; los no resueltos quedan pendientes (`mercados_sin_resolver`). Una apuesta pierde apenas una selección pierde; gana cuando todas ganan (anuladas cuentan con cuota 1). Cada cierre libera lo retenido y abona el premio con referencia única `liquidacion:apuesta:{id}`: repetir la llamada con el mismo marcador no paga dos veces; con otro marcador responde 409.",
     'security' => $sec, 'parameters' => [$idPath('Id del partido.')],
-    'requestBody' => $bodyJson('LiquidarPartidoRequest', ['goles_local' => 2, 'goles_visitante' => 1, 'ganadoras' => ['665f1c2e8f1b2a0012345999' => 'VOID', 'CORNERS_OU_9_5' => 'OVER']]),
+    'requestBody' => $bodyJson('LiquidarPartidoRequest', ['goles_local' => 2, 'goles_visitante' => 1, 'estadisticas' => ['ht_local' => 1, 'ht_visitante' => 0, 'corners_local' => 6, 'corners_visitante' => 4, 'tarjetas_local' => 2, 'tarjetas_visitante' => 3, 'tiros_local' => 14, 'tiros_visitante' => 9, 'tiros_puerta_local' => 6, 'tiros_puerta_visitante' => 3], 'ganadoras' => ['665f1c2e8f1b2a0012345999' => 'VOID']]),
     'responses' => ['200' => $ok('Partido liquidado.', $ref('LiquidacionResultado'), ['partido_id' => 12, 'apuestas_liquidadas' => 37, 'mercados_sin_resolver' => []]), '404' => $errEx('Partido no encontrado.', ['Partido no encontrado.']), '409' => $errEx('Ya liquidado con otro marcador.', ['El partido ya fue liquidado con otro marcador.']), '422' => $e422] + $adminErr,
 ]];
 $paths['/admin/apuestas/{id}/anular'] = ['post' => [
@@ -440,7 +440,7 @@ $schemas = [
 
     'Cuenta' => $obj(['saldo_disponible' => $monto('120000.00'), 'saldo_retenido' => $monto('10000.00'), 'moneda' => $str('COP')], ['saldo_disponible', 'saldo_retenido', 'moneda']),
     'Movimiento' => $obj(['id' => $int(310), 'tipo' => $str('DEPOSITO'), 'monto' => $monto('50000.00'), 'saldo_disponible' => $monto('120000.00'), 'saldo_retenido' => $monto('10000.00'), 'apuesta_id' => $nullable($int(105)), 'descripcion' => $nullable($str('DEPOSITO')), 'fecha' => $fecha]),
-    'ApuestaSeleccion' => $obj(['partido_id' => $int(12), 'market_id' => $str('665f1c2e8f1b2a0012345678'), 'selection_code' => $str('1'), 'etiqueta' => $str('Local'), 'cuota' => $str('2.1000', ['description' => 'Cuota congelada al apostar.']), 'resultado' => $nullable($str('GAN', ['description' => 'Resultado de la selección una vez liquidada (p. ej. GAN, PER, VOID); null mientras esté pendiente.']))]),
+    'ApuestaSeleccion' => $obj(['partido_id' => $int(12), 'market_id' => $str('665f1c2e8f1b2a0012345678'), 'mercado_codigo' => $nullable($str('1X2')), 'mercado' => $nullable($str('Resultado final')), 'selection_code' => $str('1'), 'etiqueta' => $str('Local'), 'cuota' => $str('2.1000', ['description' => 'Cuota congelada al apostar.']), 'resultado' => $nullable($str('GAN', ['description' => 'Resultado de la selección una vez liquidada (p. ej. GAN, PER, VOID); null mientras esté pendiente.']))]),
     'Apuesta' => $obj([
         'id' => $int(105), 'tipo' => $str('COMBINADA', ['enum' => ['SIMPLE', 'COMBINADA']]), 'estado' => $str('PEND', ['enum' => ['PEND', 'GAN', 'PER', 'ANU', 'CASH'], 'description' => 'PEND pendiente, GAN ganada, PER perdida, ANU anulada, CASH cobrada anticipadamente.']),
         'monto' => $monto('10000.00'), 'cuota_total' => $str('3.8850'), 'pago_potencial' => $monto('38850.00'), 'creada_en' => $fecha, 'liquidada_en' => $nullable($fecha),
@@ -510,7 +510,14 @@ $schemas = [
     ]),
     'LiquidarPartidoRequest' => $obj([
         'goles_local' => $int(2, ['minimum' => 0, 'maximum' => 99]), 'goles_visitante' => $int(1, ['minimum' => 0, 'maximum' => 99]),
-        'ganadoras' => ['type' => 'object', 'additionalProperties' => $str('OVER', ['maxLength' => 40]), 'description' => 'Mapa `{market_id | code: opción ganadora | "VOID"}` para mercados no estándar o líneas enteras. Los mercados estándar `1X2`, `BTTS`, `OU_<n>_<d>` se resuelven solos.', 'example' => ['CORNERS_OU_9_5' => 'OVER']],
+        'ganadoras' => ['type' => 'object', 'additionalProperties' => $str('OVER', ['maxLength' => 40]), 'description' => 'Mapa `{market_id | code: opción ganadora | "VOID"}` para mercados no estándar o líneas enteras. Los mercados estándar se resuelven solos.', 'example' => ['665f1c2e8f1b2a0012345999' => 'VOID']],
+        'estadisticas' => $obj([
+            'ht_local' => $int(1, ['minimum' => 0, 'description' => '<= goles_local']), 'ht_visitante' => $int(0, ['minimum' => 0, 'description' => '<= goles_visitante']),
+            'corners_local' => $int(6, ['minimum' => 0, 'maximum' => 40]), 'corners_visitante' => $int(4, ['minimum' => 0, 'maximum' => 40]),
+            'tarjetas_local' => $int(2, ['minimum' => 0, 'maximum' => 20]), 'tarjetas_visitante' => $int(3, ['minimum' => 0, 'maximum' => 20]),
+            'tiros_local' => $int(14, ['minimum' => 0, 'maximum' => 80]), 'tiros_visitante' => $int(9, ['minimum' => 0, 'maximum' => 80]),
+            'tiros_puerta_local' => $int(6, ['minimum' => 0, 'description' => '<= tiros_local']), 'tiros_puerta_visitante' => $int(3, ['minimum' => 0, 'description' => '<= tiros_visitante']),
+        ]),
     ], ['goles_local', 'goles_visitante']),
     'LiquidacionResultado' => $obj(['partido_id' => $int(12), 'apuestas_liquidadas' => $int(37), 'mercados_sin_resolver' => $arr($str('CORNERS_OU_9_5'), ['description' => 'Mercados que quedaron pendientes por falta de resolución.'])], ['partido_id', 'apuestas_liquidadas', 'mercados_sin_resolver']),
 ];
