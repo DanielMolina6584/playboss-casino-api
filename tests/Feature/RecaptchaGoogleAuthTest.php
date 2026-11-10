@@ -136,6 +136,16 @@ class RecaptchaGoogleAuthTest extends TestCase
         }
     }
 
+    public function test_verificador_acepta_los_dos_emisores_reales_de_google_y_audiencia_en_arreglo(): void
+    {
+        $this->fakeGoogle();
+        $v = app(\App\Service\Auth\GoogleIdTokenVerifier::class);
+        foreach (['accounts.google.com', 'https://accounts.google.com'] as $iss) {
+            $this->assertSame('1122334455', $v->verificar($this->jwt(['iss' => $iss]))['sub']);
+        }
+        $this->assertSame('ana@example.com', $v->verificar($this->jwt(['aud' => ['otro', self::CLIENT]]))['email']);
+    }
+
     public function test_google_sin_client_id_es_503_y_sin_conexion_a_google_es_502(): void
     {
         config(['services.google_auth.client_id' => null]);
