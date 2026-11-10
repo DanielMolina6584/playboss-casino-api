@@ -14,7 +14,8 @@ return new class extends Migration
 
     public function up(): void
     {
-        Schema::connection('sqlsrv')->create('usuario_mfa', function (Blueprint $table) {
+        // Cada tabla se crea solo si falta: permite reintentar tras un fallo parcial.
+        Schema::connection('sqlsrv')->hasTable('usuario_mfa') || Schema::connection('sqlsrv')->create('usuario_mfa', function (Blueprint $table) {
             $table->unsignedBigInteger('usuario_id')->primary();
             $table->text('secreto_cifrado');
             $table->timestamp('confirmado_en')->nullable();   // NULL = configuración pendiente (aún no activa)
@@ -23,7 +24,7 @@ return new class extends Migration
             $table->foreign('usuario_id')->references('id_usuario')->on('usuario')->cascadeOnDelete();
         });
 
-        Schema::connection('sqlsrv')->create('usuario_mfa_recuperacion', function (Blueprint $table) {
+        Schema::connection('sqlsrv')->hasTable('usuario_mfa_recuperacion') || Schema::connection('sqlsrv')->create('usuario_mfa_recuperacion', function (Blueprint $table) {
             $table->bigIncrements('id_codigo');
             $table->unsignedBigInteger('usuario_id');
             $table->string('codigo_hash', 64);

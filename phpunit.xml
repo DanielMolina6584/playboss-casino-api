@@ -21,6 +21,7 @@
         <env name="APP_ENV" value="testing"/>
         <env name="APP_KEY" value="base64:cGhwdW5pdC10ZXN0LWtleS0wMTIzNDU2Nzg5YWJjZGU=" force="true"/>
         <env name="MFA_ENABLED" value="false" force="true"/>
+        <env name="RECAPTCHA_ENABLED" value="false" force="true"/>
         <env name="MFA_REQUIRED_ROLES" value="ADMIN" force="true"/>
         <env name="APP_URL" value="http://localhost"/>
         <env name="PAYMENT_GATEWAY_DRIVER" value="wompi"/>
