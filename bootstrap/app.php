@@ -25,6 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // API pura: no hay ruta web de login a la cual redirigir a un guest no autenticado.
         $middleware->redirectGuestsTo(fn () => null);
+        // Render (y Cloudflare) terminan HTTPS en su proxy: se confía en X-Forwarded-Proto
+        // para que url() genere enlaces https y no haya contenido mixto en Swagger.
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(fn ($request, $e) => $request->is('api/*') || $request->expectsJson());
