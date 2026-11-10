@@ -31,6 +31,8 @@ class RetiroRequest extends FormRequest
             'numero_cuenta' => ['required', 'string', 'regex:/^\d{6,20}$/'],
             'titular' => ['required', 'string', 'min:3', 'max:120'],
             'documento_titular' => ['required', 'string', 'regex:/^\d{5,15}$/'],
+            'codigo_mfa' => ['nullable', 'string', 'max:16'],
+            'codigo_recuperacion' => ['nullable', 'string', 'max:32'],
             'idempotency_key' => ['required', 'string', 'min:8', 'max:100'],
         ];
     }

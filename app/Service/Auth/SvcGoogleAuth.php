@@ -7,6 +7,7 @@ use App\Models\Usuario\CredencialUsuario;
 use App\Models\Usuario\PerfilUsuario;
 use App\Models\Usuario\Usuario;
 use App\Service\Storage\AuditLogService;
+use App\Service\Auth\Mfa\SvcMfa;
 use App\Service\SvcUsuario;
 use Illuminate\Support\Facades\DB;
 
@@ -16,11 +17,12 @@ class SvcGoogleAuth
     public function __construct(
         private readonly GoogleIdTokenVerifier $verificador,
         private readonly SvcUsuario $usuarios,
-        private readonly AuditLogService $auditoria
+        private readonly AuditLogService $auditoria,
+        private readonly SvcMfa $mfa
     ) {
     }
 
-    /** @return array{usuario:Usuario,token:string,nuevo:bool} */
+    /** @return array{usuario:Usuario,token:?string,nuevo:bool,mfa:?array} `mfa` trae el reto cuando el usuario tiene 2FA (y `token` es null). */
     public function autenticar(string $credential, string $ip, ?string $dispositivo): array
     {
         $g = $this->verificador->verificar($credential);
@@ -56,10 +58,16 @@ class SvcGoogleAuth
             throw new ReglaNegocioException('No fue posible iniciar sesión con Google.', 401);
         }
 
+        if ($this->mfa->activo($usuario->id_usuario)) {
+            $this->auditoria->registrarAutenticacion($usuario->id_usuario, $g['email'], true, $ip, $dispositivo, 'google_mfa_pendiente');
+
+            return ['usuario' => $usuario, 'token' => null, 'nuevo' => $nuevo, 'mfa' => $this->mfa->iniciarReto($usuario, 'google', ['nuevo' => $nuevo])];
+        }
+
         $token = $usuario->createToken('playboss-api');
         $this->auditoria->registrarAutenticacion($usuario->id_usuario, $g['email'], true, $ip, $dispositivo, 'google', $token->accessToken->id);
 
-        return ['usuario' => $usuario->fresh(['credencial', 'perfil']), 'token' => $token->plainTextToken, 'nuevo' => $nuevo];
+        return ['usuario' => $usuario->fresh(['credencial', 'perfil']), 'token' => $token->plainTextToken, 'nuevo' => $nuevo, 'mfa' => null];
     }
 
     private function crear(array $g): Usuario

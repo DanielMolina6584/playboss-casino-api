@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Concerns\RespondsJson;
 use App\Http\Requests\ListadoRequest;
 use App\Http\Requests\RetiroRequest;
 use App\Models\Payment\Retiro;
+use App\Service\Auth\Mfa\SvcMfa;
 use App\Service\Payment\RetiroService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
@@ -14,12 +15,15 @@ class RetiroController extends Controller
 {
     use RespondsJson;
 
-    public function __construct(private readonly RetiroService $retiros)
+    public function __construct(private readonly RetiroService $retiros, private readonly SvcMfa $mfa)
     {
     }
 
     public function store(RetiroRequest $r): JsonResponse
     {
+        // Con 2FA activo, cada solicitud de retiro exige un código vigente (TOTP o de recuperación).
+        $this->mfa->exigirParaRetiro($r->user(), $r->input('codigo_mfa'), $r->input('codigo_recuperacion'), $r->ip(), $r->userAgent());
+
         $retiro = $this->retiros->solicitar(
             (int) $r->user()->getAuthIdentifier(),
             (string) $r->input('monto'),

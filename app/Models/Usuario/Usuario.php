@@ -40,6 +40,11 @@ class Usuario extends SqlServerAuthenticatable
         return $this->hasOne(PerfilUsuario::class, 'usuario_id', 'id_usuario');
     }
 
+    public function mfa(): HasOne
+    {
+        return $this->hasOne(UsuarioMfa::class, 'usuario_id', 'id_usuario');
+    }
+
     public function rol(): BelongsTo
     {
         return $this->belongsTo(Rol::class, 'rol_codigo', 'codigo');
@@ -83,7 +88,7 @@ class Usuario extends SqlServerAuthenticatable
         return array_merge(
             $this->attributesToArray(),
             $perfil,
-            ['correo' => $this->credencial?->correo, 'auth_proveedor' => $this->credencial?->auth_proveedor ?? 'LOCAL', 'perfil_completo' => $this->perfilCompleto()]
+            ['correo' => $this->credencial?->correo, 'auth_proveedor' => $this->credencial?->auth_proveedor ?? 'LOCAL', 'perfil_completo' => $this->perfilCompleto(), 'mfa_activo' => config('mfa.enabled') && $this->loadMissing('mfa')->mfa?->confirmado_en !== null, 'mfa_obligatorio' => config('mfa.enabled') && in_array($this->rol_codigo, (array) config('mfa.required_roles'), true)]
         );
     }
 }

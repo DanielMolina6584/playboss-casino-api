@@ -7,7 +7,9 @@ use App\Http\Controllers\Api\Concerns\RespondsJson;
 use App\Http\Requests\CambiarEstadoUsuarioRequest;
 use App\Http\Requests\ListadoRequest;
 use App\Models\Usuario\Usuario;
+use App\Service\Auth\Mfa\SvcMfa;
 use App\Service\Storage\AuditLogService;
+use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,7 @@ class UsuarioAdminController extends Controller
 {
     use RespondsJson;
 
-    public function __construct(private readonly AuditLogService $audit)
+    public function __construct(private readonly AuditLogService $audit, private readonly SvcMfa $mfa)
     {
     }
 
@@ -67,6 +69,18 @@ class UsuarioAdminController extends Controller
         }
 
         return $this->ok(self::presentar($usuario));
+    }
+
+    /** Quita el 2FA de un usuario (perdió el teléfono y los códigos de recuperación) y cierra sus sesiones. */
+    public function restablecerMfa(Request $r, int $id): JsonResponse
+    {
+        $r->validate(['motivo' => ['required', 'string', 'min:5', 'max:300']]);
+        if ((int) $r->user()->getAuthIdentifier() === $id) {
+            throw new ReglaNegocioException('No puedes restablecer tu propio 2FA; pídeselo a otro administrador.', 422);
+        }
+        $tenia = $this->mfa->restablecer($id, (int) $r->user()->getAuthIdentifier(), (string) $r->input('motivo'), $r->ip());
+
+        return $this->ok(['usuario_id' => $id, 'tenia_mfa' => $tenia], 200, [$tenia ? 'Autenticación en dos pasos restablecida; el usuario debe volver a iniciar sesión.' : 'El usuario no tenía 2FA activo; se cerraron sus sesiones.']);
     }
 
     /** Sin contraseña, tokens ni datos de contacto completos: documento enmascarado. */

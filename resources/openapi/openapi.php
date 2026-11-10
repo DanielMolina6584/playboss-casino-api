@@ -112,7 +112,9 @@ $paths['/auth/registro'] = ['post' => [
 ]];
 $paths['/auth/login'] = ['post' => [
     'tags' => ['Auth'], 'operationId' => 'authLogin', 'summary' => 'Iniciar sesión',
-    'description' => "Valida credenciales y devuelve un token Bearer. Cada intento (exitoso o no) se audita. Cuentas inactivas reciben el mismo 401 genérico.{$limites}5/min por correo+IP y 30/min por IP (devuelve 429 con `data.retry_after`). Los errores 422 traen `mensaje[]` y `data.errores` por campo.",
+    'description' => "Valida credenciales y devuelve un token Bearer. Cada intento (exitoso o no) se audita. Cuentas inactivas reciben el mismo 401 genérico.
+
+**2FA:** si el usuario tiene el segundo factor activo, la respuesta 200 NO trae `token` ni `usuario`: trae `{mfa_required: true, mfa_token, expira_en: 300, metodos}` y el token real se obtiene en `POST /auth/mfa/verificar`. Solo se revela tras validar bien la contraseña.{$limites}5/min por correo+IP y 30/min por IP (devuelve 429 con `data.retry_after`). Los errores 422 traen `mensaje[]` y `data.errores` por campo.",
     'security' => [],
     'requestBody' => $bodyJson('LoginRequest', ['correo' => 'laura@example.com', 'contrasena' => 'Clave-segura-1']),
     'responses' => [
@@ -124,7 +126,7 @@ $paths['/auth/login'] = ['post' => [
 ]];
 $paths['/auth/google'] = ['post' => [
     'tags' => ['Auth'], 'operationId' => 'authGoogle', 'summary' => 'Iniciar sesión o registrarse con Google',
-    'description' => "Recibe el `credential` (id_token) de Google Identity Services y valida **en el servidor** firma RS256 (llaves públicas de Google), expiración, emisor y audiencia (`GOOGLE_CLIENT_ID`); exige `email_verified`. Busca al usuario por `google_sub` o por correo (si existe una cuenta con contraseña con ese correo, la vincula). Si no existe, crea un usuario `CLIENTE` activo **sin contraseña**, con nombre y foto de Google. Devuelve el mismo token Bearer que `/auth/login`.\n\n`data.estado` es `perfil_incompleto` (y `perfil_incompleto: true`) cuando faltan fecha de nacimiento, documento o apellido: hasta completarlos con `PUT /auth/google/completar`, `POST /apuestas` y `POST /pagos/depositos` responden 403 con `data.perfil_incompleto: true`. Responde 201 si la cuenta se acaba de crear, 200 si ya existía. 409 si la cuenta ya está vinculada a otra identidad de Google; 401 si el token es inválido o la cuenta está inactiva; 403 si el correo de Google no está verificado; 503 si falta `GOOGLE_CLIENT_ID`; 502 si no se puede contactar a Google.{$limites}5/min por correo+IP y 30/min por IP (bucket `login`).",
+    'description' => "Recibe el `credential` (id_token) de Google Identity Services y valida **en el servidor** firma RS256 (llaves públicas de Google), expiración, emisor y audiencia (`GOOGLE_CLIENT_ID`); exige `email_verified`. Busca al usuario por `google_sub` o por correo (si existe una cuenta con contraseña con ese correo, la vincula). Si no existe, crea un usuario `CLIENTE` activo **sin contraseña**, con nombre y foto de Google. Devuelve el mismo token Bearer que `/auth/login`, salvo que el usuario tenga 2FA activo: entonces la respuesta es `{mfa_required, mfa_token, expira_en, metodos}` (ver `POST /auth/mfa/verificar`).\n\n`data.estado` es `perfil_incompleto` (y `perfil_incompleto: true`) cuando faltan fecha de nacimiento, documento o apellido: hasta completarlos con `PUT /auth/google/completar`, `POST /apuestas` y `POST /pagos/depositos` responden 403 con `data.perfil_incompleto: true`. Responde 201 si la cuenta se acaba de crear, 200 si ya existía. 409 si la cuenta ya está vinculada a otra identidad de Google; 401 si el token es inválido o la cuenta está inactiva; 403 si el correo de Google no está verificado; 503 si falta `GOOGLE_CLIENT_ID`; 502 si no se puede contactar a Google.{$limites}5/min por correo+IP y 30/min por IP (bucket `login`).",
     'security' => [],
     'requestBody' => $bodyJson('GoogleLoginRequest', ['credential' => 'eyJhbGciOiJSUzI1NiIs...']),
     'responses' => [
@@ -482,6 +484,81 @@ $paths['/admin/usuarios/{id}/estado'] = ['put' => [
     'responses' => ['200' => $ok('Usuario actualizado.', $ref('UsuarioAdmin'), array_merge($usuarioAdminEj, ['estado_codigo' => 'BLQ'])), '404' => $errEx('Usuario no encontrado.', ['Usuario no encontrado.']), '422' => $e422] + $adminErr,
 ]];
 
+// ---- 2FA (TOTP)
+$mfaCodigos = ['codigo' => $str('482913', ['description' => 'Código TOTP de 6 dígitos (app autenticadora).', 'pattern' => '^\d{6}$']), 'codigo_recuperacion' => $str('K7M2P-9XQ4T', ['description' => 'Alternativa al TOTP: un código de recuperación (un solo uso). Se acepta con o sin guion y en minúsculas.'])];
+$mfaEstadoEj = ['habilitado' => true, 'activo' => true, 'obligatorio' => false, 'configuracion_pendiente' => false, 'recuperacion_restantes' => 10, 'confirmado_en' => '2026-11-10T12:00:00.000000Z', 'emisor' => 'PlayBoss', 'tiene_contrasena' => true];
+$mfaLimites = "{$limites}bloqueo por fallos: 5 intentos fallidos en 5 min por usuario+IP (y 15 en 15 min por usuario desde cualquier IP) responden 429 con `data.retry_after` (segundos), incluso si el código siguiente es correcto; además 10 solicitudes/min por usuario.";
+$mfaDeshabilitado = $errEx('`MFA_ENABLED=false`: el 2FA está apagado en este servidor.', ['La autenticación en dos pasos no está habilitada.']);
+$paths['/auth/mfa'] = ['get' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaEstado', 'summary' => 'Estado del 2FA',
+    'description' => 'Estado del segundo factor del usuario autenticado. `obligatorio` es `true` si su rol está en `MFA_REQUIRED_ROLES` (por defecto `ADMIN`): sin 2FA activo no puede usar `/admin/*`. `tiene_contrasena` indica si, para desactivar, debe enviar `contrasena` (true) o reautenticar con Google (false).',
+    'security' => $sec,
+    'responses' => ['200' => $ok('Estado actual.', $ref('MfaEstado'), $mfaEstadoEj)] + $authErr,
+]];
+$paths['/auth/mfa/configurar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaConfigurar', 'summary' => 'Iniciar la configuración del 2FA',
+    'description' => "Genera un secreto TOTP nuevo (160 bits, guardado **cifrado** con `APP_KEY`) y devuelve la URI `otpauth://` para el QR y la clave manual. El 2FA **aún no está activo** hasta confirmar con `POST /auth/mfa/activar`. Llamarlo otra vez antes de activar reemplaza el secreto pendiente. 409 si ya está activo; 404 si `MFA_ENABLED=false`.\n\n**Límite:** 10 solicitudes/min.",
+    'security' => $sec,
+    'responses' => [
+        '200' => $ok('Secreto pendiente de confirmar.', $ref('MfaConfiguracion'), ['secreto' => 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', 'otpauth_uri' => 'otpauth://totp/PlayBoss%3Alaura%40example.com?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=PlayBoss&algorithm=SHA1&digits=6&period=30', 'emisor' => 'PlayBoss', 'cuenta' => 'laura@example.com', 'algoritmo' => 'SHA1', 'digitos' => 6, 'periodo' => 30]),
+        '404' => $mfaDeshabilitado, '409' => $errEx('Ya está activo.', ['La autenticación en dos pasos ya está activa.']),
+    ] + $authErr,
+]];
+$paths['/auth/mfa/activar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaActivar', 'summary' => 'Confirmar y activar el 2FA',
+    'description' => "Verifica el primer código TOTP (tolerancia ±1 ventana de 30 s; un código ya usado no vale otra vez), activa el 2FA y devuelve **una sola vez** 10 códigos de recuperación (solo se guardan hasheados). Cierra las demás sesiones abiertas del usuario.{$mfaLimites}",
+    'security' => $sec,
+    'requestBody' => $bodyJson('MfaActivarRequest', ['codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('2FA activo.', $ref('MfaActivado'), ['recuperacion_codigos' => ['K7M2P-9XQ4T', 'H3N8R-5WZ2C'], 'activo' => true] + $mfaEstadoEj, ['Autenticación en dos pasos activada. Guarda tus códigos de recuperación: no se volverán a mostrar.']),
+        '409' => $errEx('No hay configuración pendiente o ya está activo.', ['Primero genera la configuración del segundo paso.']),
+        '422' => $errEx('Código incorrecto, vencido o ya usado.', ['Código incorrecto o vencido.']),
+        '404' => $mfaDeshabilitado,
+    ] + $authErr,
+]];
+$paths['/auth/mfa/desactivar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaDesactivar', 'summary' => 'Desactivar el 2FA',
+    'description' => "Exige reautenticación **y** un código: `contrasena` si la cuenta tiene contraseña; si es una cuenta de Google sin contraseña, `credential` (id_token de Google reciente cuyo `sub` coincida con el vinculado). Más `codigo` (TOTP) o `codigo_recuperacion`. Los roles en `MFA_REQUIRED_ROLES` (ADMIN) no pueden desactivarlo (403): otro administrador debe restablecerlo.{$mfaLimites}",
+    'security' => $sec,
+    'requestBody' => $bodyJson('MfaDesactivarRequest', ['contrasena' => 'Clave-segura-1', 'codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('2FA desactivado.', $ref('MfaEstado'), ['activo' => false] + $mfaEstadoEj, ['Autenticación en dos pasos desactivada.']),
+        '403' => $errEx('Tu rol exige 2FA.', ['Tu rol exige la autenticación en dos pasos; no se puede desactivar. Si perdiste el acceso, pide a otro administrador que la restablezca.']),
+        '409' => $errEx('No estaba activo.', ['La autenticación en dos pasos no está activa.']),
+        '422' => $errEx('Contraseña/Google o código incorrectos.', ['La contraseña no es correcta.']),
+        '404' => $mfaDeshabilitado,
+    ] + ['401' => $e401, '429' => $e429, '500' => $e500],
+]];
+$paths['/auth/mfa/recovery-codes'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaRecoveryCodes', 'summary' => 'Regenerar códigos de recuperación',
+    'description' => "Exige un código vigente (`codigo` o `codigo_recuperacion`). Genera 10 códigos nuevos, devueltos **una sola vez**; los anteriores dejan de servir.{$mfaLimites}",
+    'security' => $sec,
+    'requestBody' => $bodyJson('MfaCodigoRequest', ['codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('Códigos nuevos.', $obj(['recuperacion_codigos' => $arr($str('K7M2P-9XQ4T'))], ['recuperacion_codigos']), ['recuperacion_codigos' => ['K7M2P-9XQ4T', 'H3N8R-5WZ2C']], ['Códigos regenerados. Los anteriores ya no sirven.']),
+        '409' => $errEx('2FA no activo.', ['La autenticación en dos pasos no está activa.']),
+        '422' => $errEx('Código incorrecto, vencido o ya usado.', ['Código incorrecto o vencido.']),
+        '404' => $mfaDeshabilitado,
+    ] + ['401' => $e401, '429' => $e429, '500' => $e500],
+]];
+$paths['/auth/mfa/verificar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaVerificar', 'summary' => 'Segundo paso del login',
+    'description' => "Canjea el `mfa_token` (devuelto por `POST /auth/login` o `POST /auth/google` cuando el usuario tiene 2FA) más un `codigo` TOTP o `codigo_recuperacion` por el **token Bearer definitivo**. El `mfa_token` vive 5 min, sirve una sola vez, se quema tras 5 fallos y **no es un token de API** (las rutas normales lo rechazan con 401). Si el reto es de Google, la respuesta incluye además `estado`, `perfil_incompleto` y `nuevo` como `/auth/google`. Usar un código de recuperación lo consume (`factor: recuperacion`). Un `mfa_token` inválido o vencido responde siempre el mismo 401, sin revelar si el usuario existe.\n\n**Límite:** 20 solicitudes/min por IP; bloqueo por fallos: 5 en 5 min por usuario+IP (429 con `data.retry_after`).",
+    'security' => [],
+    'requestBody' => $bodyJson('MfaVerificarRequest', ['mfa_token' => 'tVq3...48 caracteres...', 'codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('Sesión iniciada.', $obj(['usuario' => $ref('Usuario'), 'token' => $str('13|xyz...'), 'factor' => $str('totp', ['enum' => ['totp', 'recuperacion']]), 'recuperacion_restantes' => $int(10), 'estado' => $str('ok'), 'perfil_incompleto' => ['type' => 'boolean'], 'nuevo' => ['type' => 'boolean']], ['usuario', 'token', 'factor']), ['usuario' => $usuarioEj, 'token' => '13|Q1w2E3r4T5y6U7i8O9p0AaSsDdFfGgHhJjKkLlZzXx', 'factor' => 'totp', 'recuperacion_restantes' => 10]),
+        '401' => $errEx('Código incorrecto, o `mfa_token` inválido/vencido/ya usado.', ['Código incorrecto o vencido.']),
+        '422' => $e422, '429' => $e429, '500' => $e500,
+    ],
+]];
+$paths['/admin/usuarios/{id}/mfa/restablecer'] = ['post' => [
+    'tags' => [$adminTag], 'operationId' => 'adminUsuarioMfaRestablecer', 'summary' => 'Restablecer el 2FA de un usuario',
+    'description' => 'Solo rol `ADMIN` (con 2FA activo). Borra el secreto y los códigos de recuperación del usuario y **cierra todas sus sesiones**; deberá volver a configurarlo (si su rol lo exige, no podrá usar `/admin/*` hasta hacerlo). `motivo` es obligatorio y queda en la auditoría (`mfa.admin_reset`). No puedes restablecer tu propio 2FA (422).',
+    'parameters' => [$idPath('Id del usuario.')],
+    'requestBody' => $bodyJson('MfaRestablecerRequest', ['motivo' => 'Perdió el teléfono; identidad validada por soporte']),
+    'responses' => ['200' => $ok('2FA restablecido.', $obj(['usuario_id' => $int(7), 'tenia_mfa' => ['type' => 'boolean']], ['usuario_id', 'tenia_mfa']), ['usuario_id' => 7, 'tenia_mfa' => true], ['Autenticación en dos pasos restablecida; el usuario debe volver a iniciar sesión.']), '404' => $errEx('Usuario no encontrado.', ['Usuario no encontrado.']), '422' => $e422] + $adminErr,
+]];
 // ---- Juego responsable
 $limitesEj = ['limites' => ['deposito_diario' => '200000.00', 'deposito_semanal' => null, 'deposito_mensual' => '1000000.00', 'apuesta_diario' => '100000.00', 'apuesta_semanal' => null, 'apuesta_mensual' => null], 'consumo' => ['apuesta_diario' => ['limite' => '100000.00', 'usado' => '30000.00', 'disponible' => '70000.00']], 'autoexclusion' => ['activa' => false, 'hasta' => null]];
 $paths['/perfil/limites'] = [
@@ -549,6 +626,7 @@ $schemas = [
         'foto_drive_id' => $nullable($str('1AbCdEfGhIjKlMnOp', ['description' => 'Id de la foto en Google Drive; la imagen se obtiene con `GET /perfil/foto`.'])),
         'foto_url' => $nullable($str('https://lh3.googleusercontent.com/a/...', ['description' => 'Foto de Google (solo usuarios creados con Google).'])),
         'auth_proveedor' => $str('LOCAL', ['enum' => ['LOCAL', 'GOOGLE'], 'description' => '`GOOGLE` = creado con Google y sin contraseña propia (puede fijarla con `/auth/recuperar`).']),
+        'mfa_activo' => ['type' => 'boolean', 'example' => false, 'description' => 'El usuario tiene el 2FA activo.'], 'mfa_obligatorio' => ['type' => 'boolean', 'example' => false, 'description' => 'Su rol exige 2FA (`MFA_REQUIRED_ROLES`): si `mfa_obligatorio` y no `mfa_activo`, `/admin/*` responde 403 con `data.mfa_requerido`.'],
         'perfil_completo' => ['type' => 'boolean', 'example' => true, 'description' => 'false si faltan fecha de nacimiento, documento o apellido: debe llamar a `PUT /auth/google/completar` antes de apostar o depositar.'],
     ], ['id_usuario', 'rol_codigo', 'estado_codigo', 'correo']),
     'RegistroRequest' => $obj([
@@ -707,8 +785,18 @@ $schemas = [
         'banco' => $str('Bancolombia', ['maxLength' => 60]), 'tipo_cuenta' => $str('AHORROS', ['enum' => ['AHORROS', 'CORRIENTE', 'NEQUI', 'DAVIPLATA']]),
         'numero_cuenta' => $str('12345677890', ['pattern' => '^\d{6,20}$']), 'titular' => $str('Laura Gómez Pérez', ['minLength' => 3, 'maxLength' => 120]),
         'documento_titular' => $str('1020304050', ['pattern' => '^\d{5,15}$', 'description' => 'Debe coincidir con el documento del usuario.']),
+        'codigo_mfa' => $str('482913', ['description' => 'Código TOTP vigente. **Obligatorio si el usuario tiene 2FA activo** (o `codigo_recuperacion`); si falta, 403 con `data.mfa_codigo_requerido: true`; si es incorrecto, 422. Si su rol exige 2FA y no lo tiene, 403 con `data.mfa_requerido`.']),
+        'codigo_recuperacion' => $str('K7M2P-9XQ4T', ['description' => 'Alternativa a `codigo_mfa`.']),
         'idempotency_key' => $idem,
     ], ['monto', 'banco', 'tipo_cuenta', 'numero_cuenta', 'titular', 'documento_titular']),
+    'MfaEstado' => $obj(['habilitado' => ['type' => 'boolean'], 'activo' => ['type' => 'boolean'], 'obligatorio' => ['type' => 'boolean', 'description' => 'El rol del usuario exige 2FA.'], 'configuracion_pendiente' => ['type' => 'boolean'], 'recuperacion_restantes' => $int(10), 'confirmado_en' => $nullable($fecha), 'emisor' => $str('PlayBoss'), 'tiene_contrasena' => ['type' => 'boolean']], ['habilitado', 'activo', 'obligatorio']),
+    'MfaConfiguracion' => $obj(['secreto' => $str('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', ['description' => 'Clave base32 para ingreso manual.']), 'otpauth_uri' => $str('otpauth://totp/...', ['description' => 'Contenido del código QR.']), 'emisor' => $str('PlayBoss'), 'cuenta' => $str('laura@example.com'), 'algoritmo' => $str('SHA1'), 'digitos' => $int(6), 'periodo' => $int(30)], ['secreto', 'otpauth_uri']),
+    'MfaActivado' => $obj(['recuperacion_codigos' => $arr($str('K7M2P-9XQ4T'), ['description' => '10 códigos de un solo uso; se muestran solo en esta respuesta.']), 'habilitado' => ['type' => 'boolean'], 'activo' => ['type' => 'boolean'], 'obligatorio' => ['type' => 'boolean'], 'recuperacion_restantes' => $int(10), 'confirmado_en' => $nullable($fecha)], ['recuperacion_codigos', 'activo']),
+    'MfaActivarRequest' => $obj(['codigo' => $mfaCodigos['codigo']], ['codigo']),
+    'MfaCodigoRequest' => $obj($mfaCodigos, [], ['description' => 'Al menos uno de `codigo` o `codigo_recuperacion`.']),
+    'MfaDesactivarRequest' => $obj(['contrasena' => $str('Clave-segura-1', ['format' => 'password', 'description' => 'Requerida si la cuenta tiene contraseña.']), 'credential' => $str('eyJhbGciOiJSUzI1NiIs...', ['description' => 'id_token de Google (solo cuentas sin contraseña).'])] + $mfaCodigos, [], ['description' => 'Reautenticación (`contrasena` o `credential`) más `codigo` o `codigo_recuperacion`.']),
+    'MfaVerificarRequest' => $obj(['mfa_token' => $str('tVq3...', ['description' => 'Token de reto devuelto por login/Google.'])] + $mfaCodigos, ['mfa_token'], ['description' => 'Además, `codigo` o `codigo_recuperacion`.']),
+    'MfaRestablecerRequest' => $obj(['motivo' => $str('Perdió el teléfono', ['minLength' => 5, 'maxLength' => 300])], ['motivo']),
     'RechazarRetiroRequest' => $obj(['motivo' => $str('Datos bancarios inválidos', ['minLength' => 3, 'maxLength' => 200])], ['motivo']),
     'UsuarioAdmin' => $obj([
         'id_usuario' => $int(7), 'rol_codigo' => $str('CLIENTE'), 'estado_codigo' => $str('ACT', ['description' => 'ACT activo, BLQ bloqueado, SUS suspendido.']), 'fecha_registro' => $fecha,
@@ -752,6 +840,7 @@ $respuestas = [
 // Tags
 $tags = [
     ['name' => 'Auth', 'description' => 'Registro, login, sesión y recuperación de contraseña.'],
+    ['name' => 'MFA', 'description' => 'Autenticación en dos pasos (TOTP, apps tipo Google Authenticator/Authy): configurar, activar, desactivar, códigos de recuperación y verificación del login.'],
     ['name' => 'Catálogo', 'description' => 'Datos deportivos públicos de solo lectura (MySQL) y mercados/cuotas activas (MongoDB). 120 solicitudes/min por IP.'],
     ['name' => 'Perfil', 'description' => 'Datos personales y contraseña del usuario autenticado.'],
     ['name' => 'Cuenta', 'description' => 'Saldo y movimientos contables (PostgreSQL).'],
