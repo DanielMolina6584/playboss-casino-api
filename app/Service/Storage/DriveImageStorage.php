@@ -4,13 +4,25 @@ namespace App\Service\Storage;
 
 use Google\Service\Drive;
 use Google\Service\Drive\DriveFile;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\UploadedFile;
 use RuntimeException;
 
 class DriveImageStorage
 {
-    public function __construct(private readonly Drive $drive)
+    private ?Drive $drive = null;
+
+    /**
+     * El cliente de Drive se crea solo cuando se usa: así login y registro no dependen
+     * de que las credenciales de Google se puedan leer en ese momento.
+     */
+    public function __construct(private readonly Container $container)
     {
+    }
+
+    private function drive(): Drive
+    {
+        return $this->drive ??= $this->container->make(Drive::class);
     }
 
     /** @return array{id:string,name:string,mime_type:string,web_view_link:?string} */
@@ -35,7 +47,7 @@ class DriveImageStorage
             $options['supportsAllDrives'] = true;
         }
 
-        $file = $this->drive->files->create($metadata, $options);
+        $file = $this->drive()->files->create($metadata, $options);
 
         return [
             'id' => $file->id,
@@ -52,8 +64,8 @@ class DriveImageStorage
     public function descargar(string $fileId): array
     {
         $options = config('services.google_drive.shared_drive_id') ? ['supportsAllDrives' => true] : [];
-        $meta = $this->drive->files->get($fileId, $options + ['fields' => 'mimeType']);
-        $respuesta = $this->drive->files->get($fileId, $options + ['alt' => 'media']);
+        $meta = $this->drive()->files->get($fileId, $options + ['fields' => 'mimeType']);
+        $respuesta = $this->drive()->files->get($fileId, $options + ['alt' => 'media']);
 
         return [
             'contenido' => (string) $respuesta->getBody(),
@@ -64,6 +76,6 @@ class DriveImageStorage
     public function eliminar(string $fileId): void
     {
         $options = config('services.google_drive.shared_drive_id') ? ['supportsAllDrives' => true] : [];
-        $this->drive->files->delete($fileId, $options);
+        $this->drive()->files->delete($fileId, $options);
     }
 }
