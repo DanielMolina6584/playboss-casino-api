@@ -44,6 +44,8 @@ Prefijo `/api`. Todas las respuestas usan el sobre `{ "error": 0|1, "mensaje": [
 | Grupo | Endpoint | Notas |
 | --- | --- | --- |
 | Auth | `POST /auth/registro`, `POST /auth/login` (5/min por correo+IP y 30/min por IP), `POST /auth/logout`, `GET /auth/me` | |
+| Google | `POST /auth/google` `{credential}` (id_token de Google; valida firma/aud/iss/exp y `email_verified`; crea o vincula el usuario sin contraseña; devuelve `estado: perfil_incompleto` si faltan fecha de nacimiento/documento), `PUT /auth/google/completar` | Hasta completar el perfil, `POST /apuestas` y `POST /pagos/depositos` responden 403 (`data.perfil_incompleto`). Variable `GOOGLE_CLIENT_ID`. Guía: `docs/credenciales/GOOGLE-RECAPTCHA.md` |
+| reCAPTCHA v3 | `recaptcha_token` (body) o header `X-Recaptcha-Token` en `/auth/registro`, `/login`, `/recuperar`, `/restablecer` | Solo si `RECAPTCHA_ENABLED=true` (`RECAPTCHA_SECRET`, `RECAPTCHA_MIN_SCORE`, acción esperada por endpoint); 422/403 si es inválido, 502 si Google no responde |
 | Recuperación | `POST /auth/recuperar` `{correo}`, `POST /auth/restablecer` `{correo, codigo(6 dígitos), contrasena, contrasena_confirmation}` | Código de 15 min, un solo uso, enviado por el mailer configurado (`MAIL_MAILER=log` en local) |
 | Catálogo (público) | `GET /deportes /ligas /temporadas /equipos /estadios /jugadores /jornadas` | Filtros: `q, liga_id, temporada_id, equipo_id, ciudad_id, servicio_codigo, pais_codigo` |
 | | `GET /partidos` | Filtros: `liga_id, temporada_id, jornada_id, equipo_id, estado, desde, hasta, orden` |
@@ -55,6 +57,10 @@ Prefijo `/api`. Todas las respuestas usan el sobre `{ "error": 0|1, "mensaje": [
 | Admin (rol `ADMIN`) | `apiResource /admin/equipos`, `/admin/ligas`, `/admin/partidos`, `/admin/mercados`, `/admin/reglas` | CRUD; los mercados se suspenden en lugar de borrarse |
 | | `POST /admin/partidos/{id}/liquidar` `{goles_local, goles_visitante, ganadoras?}` | Liquida mercados y apuestas, abona premios |
 | | `POST /admin/apuestas/{id}/anular` | Devuelve el monto retenido |
+| Retiros | `POST /pagos/retiros`, `GET /pagos/retiros` | Solicitud PENDIENTE (saldo disponible -> retenido, idempotente); cuenta destino del mismo titular. Admin: `GET /admin/retiros`, `POST /admin/retiros/{id}/aprobar` (PAGADO; **TODO** payout real) y `/rechazar {motivo}` (libera saldo) |
+| Admin usuarios | `GET /admin/usuarios` (`q, estado, rol, desde, hasta`), `PUT /admin/usuarios/{id}/estado` `{estado: ACT\|BLQ\|SUS}` | Sin datos sensibles; bloquear revoca tokens |
+| Juego responsable | `GET/PUT /perfil/limites` | Límites diario/semanal/mensual de depósito y apuesta (PostgreSQL `limite_juego`) y autoexclusión; los aplican `POST /apuestas` y `POST /pagos/depositos` |
+| Público | `POST /contacto` (5/min; Mongo `contact_messages` + correo a `CONTACT_TO_ADDRESS`), `GET /configuracion/limites`, `GET /media/equipos/{id}/escudo`, `GET /media/ligas/{id}/logo` | `escudo_url`/`logo_url` en equipos y ligas; `GET /partidos?q=` busca por equipo o liga |
 
 ### Crear apuesta
 

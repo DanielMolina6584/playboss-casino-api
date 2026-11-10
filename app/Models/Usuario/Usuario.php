@@ -60,6 +60,15 @@ class Usuario extends SqlServerAuthenticatable
         return $this->estado_codigo === 'ACT';
     }
 
+    /** Datos obligatorios para apostar/depositar; un usuario creado con Google nace sin ellos. */
+    public function perfilCompleto(): bool
+    {
+        $this->loadMissing('perfil');
+        $p = $this->perfil;
+
+        return $p && $p->fecha_nacimiento !== null && $p->tipo_documento_codigo && $p->numero_documento && $p->primer_apellido;
+    }
+
     public function tieneRol(string $codigo): bool
     {
         return $this->rol_codigo === $codigo;
@@ -74,7 +83,7 @@ class Usuario extends SqlServerAuthenticatable
         return array_merge(
             $this->attributesToArray(),
             $perfil,
-            ['correo' => $this->credencial?->correo]
+            ['correo' => $this->credencial?->correo, 'auth_proveedor' => $this->credencial?->auth_proveedor ?? 'LOCAL', 'perfil_completo' => $this->perfilCompleto()]
         );
     }
 }

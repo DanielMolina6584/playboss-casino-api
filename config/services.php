@@ -58,6 +58,21 @@ return [
         'base_url' => env('WOMPI_BASE_URL', 'https://sandbox.wompi.co/v1'),
         'redirect_url' => env('WOMPI_REDIRECT_URL'),
         'checkout_url' => env('WOMPI_CHECKOUT_URL', 'https://checkout.wompi.co/p/'),
+        'expiration_minutes' => (int) env('WOMPI_EXPIRATION_MINUTES', 60),
+    ],
+
+    // reCAPTCHA v3 (Google). Deshabilitado por defecto: en local/tests no se exige.
+    'recaptcha' => [
+        'enabled' => (bool) env('RECAPTCHA_ENABLED', false),
+        'secret' => env('RECAPTCHA_SECRET'),
+        'min_score' => (float) env('RECAPTCHA_MIN_SCORE', 0.5),
+        'verify_url' => 'https://www.google.com/recaptcha/api/siteverify',
+    ],
+
+    // Inicio de sesión con Google (Google Identity Services): solo se valida el id_token en el back.
+    'google_auth' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'jwks_url' => 'https://www.googleapis.com/oauth2/v3/certs',
     ],
 
     'payment_gateway' => [

@@ -12,12 +12,13 @@ use App\Models\Market\ReglaApuesta;
 use App\Models\Sports\Partido;
 use App\Models\Usuario\PerfilUsuario;
 use App\Service\Account\AccountService;
+use App\Service\Account\LimiteJuegoService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class BetService
 {
-    public function __construct(private readonly AccountService $accounts)
+    public function __construct(private readonly AccountService $accounts, private readonly LimiteJuegoService $limites)
     {
     }
 
@@ -62,8 +63,9 @@ class BetService
             throw ValidationException::withMessages(['selecciones' => 'El pago potencial supera el máximo permitido.']);
         }
 
+        \App\Service\Auth\PerfilApostador::exigir($usuarioId);
         $perfil = PerfilUsuario::query()->find($usuarioId);
-        if (!$perfil || $perfil->fecha_nacimiento->isFuture() || $perfil->fecha_nacimiento->diffInYears(now()) < $edadMinima) {
+        if (!$perfil || !$perfil->fecha_nacimiento || $perfil->fecha_nacimiento->isFuture() || $perfil->fecha_nacimiento->diffInYears(now()) < $edadMinima) {
             throw ValidationException::withMessages(['usuario' => 'El usuario no cumple la edad mínima para apostar.']);
         }
 
@@ -86,6 +88,7 @@ class BetService
                 throw ValidationException::withMessages(['monto' => 'Saldo disponible insuficiente.']);
             }
 
+            $this->limites->validarApuesta($usuarioId, $stakeCentavos);
             $this->validarLimitesDiarios($usuarioId, $stakeCentavos);
 
             $apuesta = Apuesta::query()->create([
