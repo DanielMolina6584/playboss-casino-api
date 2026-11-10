@@ -77,6 +77,8 @@ $e500 = $errR('ErrorInterno');
 $e502 = $errR('PasarelaNoDisponible');
 $e409 = $errR('Conflicto');
 
+$recaptcha = ['type' => 'string', 'description' => 'Token de reCAPTCHA v3 (acción `registro`, `login`, `recuperar` o `restablecer`). Obligatorio solo si la API tiene `RECAPTCHA_ENABLED=true`; también se acepta en el header `X-Recaptcha-Token`. Con reCAPTCHA activo, las respuestas posibles añaden: 422 (token ausente/inválido), 403 (score bajo o acción distinta), 502 (Google no responde).', 'example' => '03AFcWeA...'];
+
 // Combinaciones de errores frecuentes por tipo de endpoint.
 $authErr = ['401' => $e401, '403' => $e403, '429' => $e429, '500' => $e500];
 $adminErr = ['401' => $e401, '403' => $errEx('Usuario inactivo o sin rol `ADMIN`.', ['No tienes permisos para esta acción.']), '429' => $e429, '500' => $e500];
@@ -110,7 +112,9 @@ $paths['/auth/registro'] = ['post' => [
 ]];
 $paths['/auth/login'] = ['post' => [
     'tags' => ['Auth'], 'operationId' => 'authLogin', 'summary' => 'Iniciar sesión',
-    'description' => "Valida credenciales y devuelve un token Bearer. Cada intento (exitoso o no) se audita. Cuentas inactivas reciben el mismo 401 genérico.{$limites}5/min por correo+IP y 30/min por IP (devuelve 429 con `data.retry_after`). Los errores 422 traen `mensaje[]` y `data.errores` por campo.",
+    'description' => "Valida credenciales y devuelve un token Bearer. Cada intento (exitoso o no) se audita. Cuentas inactivas reciben el mismo 401 genérico.
+
+**2FA:** si el usuario tiene el segundo factor activo, la respuesta 200 NO trae `token` ni `usuario`: trae `{mfa_required: true, mfa_token, expira_en: 300, metodos}` y el token real se obtiene en `POST /auth/mfa/verificar`. Solo se revela tras validar bien la contraseña.{$limites}5/min por correo+IP y 30/min por IP (devuelve 429 con `data.retry_after`). Los errores 422 traen `mensaje[]` y `data.errores` por campo.",
     'security' => [],
     'requestBody' => $bodyJson('LoginRequest', ['correo' => 'laura@example.com', 'contrasena' => 'Clave-segura-1']),
     'responses' => [
@@ -119,6 +123,33 @@ $paths['/auth/login'] = ['post' => [
         '422' => $errEx('Faltan campos o el correo no es válido.', ['El campo correo es obligatorio.'], ['errores' => ['correo' => ['El campo correo es obligatorio.']]]),
         '429' => $e429, '500' => $e500,
     ],
+]];
+$paths['/auth/google'] = ['post' => [
+    'tags' => ['Auth'], 'operationId' => 'authGoogle', 'summary' => 'Iniciar sesión o registrarse con Google',
+    'description' => "Recibe el `credential` (id_token) de Google Identity Services y valida **en el servidor** firma RS256 (llaves públicas de Google), expiración, emisor y audiencia (`GOOGLE_CLIENT_ID`); exige `email_verified`. Busca al usuario por `google_sub` o por correo (si existe una cuenta con contraseña con ese correo, la vincula). Si no existe, crea un usuario `CLIENTE` activo **sin contraseña**, con nombre y foto de Google. Devuelve el mismo token Bearer que `/auth/login`, salvo que el usuario tenga 2FA activo: entonces la respuesta es `{mfa_required, mfa_token, expira_en, metodos}` (ver `POST /auth/mfa/verificar`).\n\n`data.estado` es `perfil_incompleto` (y `perfil_incompleto: true`) cuando faltan fecha de nacimiento, documento o apellido: hasta completarlos con `PUT /auth/google/completar`, `POST /apuestas` y `POST /pagos/depositos` responden 403 con `data.perfil_incompleto: true`. Responde 201 si la cuenta se acaba de crear, 200 si ya existía. 409 si la cuenta ya está vinculada a otra identidad de Google; 401 si el token es inválido o la cuenta está inactiva; 403 si el correo de Google no está verificado; 503 si falta `GOOGLE_CLIENT_ID`; 502 si no se puede contactar a Google.{$limites}5/min por correo+IP y 30/min por IP (bucket `login`).",
+    'security' => [],
+    'requestBody' => $bodyJson('GoogleLoginRequest', ['credential' => 'eyJhbGciOiJSUzI1NiIs...']),
+    'responses' => [
+        '200' => $ok('Sesión iniciada (cuenta existente).', $obj(['usuario' => $ref('Usuario'), 'token' => $str('13|xyz...'), 'estado' => $str('ok', ['enum' => ['ok', 'perfil_incompleto']]), 'perfil_incompleto' => ['type' => 'boolean'], 'nuevo' => ['type' => 'boolean']], ['usuario', 'token', 'estado', 'perfil_incompleto', 'nuevo']), ['usuario' => $usuarioEj, 'token' => '13|Q1w2E3r4T5y6U7i8O9p0AaSsDdFfGgHhJjKkLlZzXx', 'estado' => 'ok', 'perfil_incompleto' => false, 'nuevo' => false]),
+        '201' => $ok('Cuenta creada con Google (normalmente `perfil_incompleto`).', $obj(['usuario' => $ref('Usuario'), 'token' => $str('14|xyz...'), 'estado' => $str('perfil_incompleto'), 'perfil_incompleto' => ['type' => 'boolean'], 'nuevo' => ['type' => 'boolean']], ['usuario', 'token', 'estado', 'perfil_incompleto', 'nuevo']), ['usuario' => $usuarioEj, 'token' => '14|Z9y8X7w6V5u4T3s2R1q0PoNmLkJiHgFeDcBa', 'estado' => 'perfil_incompleto', 'perfil_incompleto' => true, 'nuevo' => true]),
+        '401' => $errEx('Token de Google inválido o vencido, o cuenta inactiva.', ['Token de Google inválido o vencido.']),
+        '403' => $errEx('Correo de Google sin verificar.', ['Tu correo de Google no está verificado.']),
+        '409' => $errEx('Cuenta ya vinculada a otra identidad de Google.', ['Esta cuenta ya está vinculada a otra cuenta de Google.']),
+        '422' => $e422, '429' => $e429, '500' => $e500,
+        '502' => $errEx('No se pudo contactar a Google.', ['No se pudo contactar a Google. Intenta nuevamente.']),
+        '503' => $errEx('`GOOGLE_CLIENT_ID` sin configurar.', ['El inicio de sesión con Google no está configurado.']),
+    ],
+]];
+$paths['/auth/google/completar'] = ['put' => [
+    'tags' => ['Auth'], 'operationId' => 'authGoogleCompletar', 'summary' => 'Completar perfil (usuarios de Google)',
+    'description' => 'Fija fecha de nacimiento (mayor de edad), documento y apellido de un usuario con `perfil_completo: false`. Solo se puede usar una vez: si el perfil ya está completo responde 409. Es requisito para apostar y depositar.',
+    'security' => $sec,
+    'requestBody' => $bodyJson('CompletarPerfilRequest', ['primer_apellido' => 'Gómez', 'tipo_documento_codigo' => 'CC', 'numero_documento' => '1020304050', 'fecha_nacimiento' => '1995-04-12']),
+    'responses' => [
+        '200' => $ok('Perfil completado.', $obj(['usuario' => $ref('Usuario'), 'perfil_incompleto' => ['type' => 'boolean']], ['usuario']), ['usuario' => $usuarioEj, 'perfil_incompleto' => false], ['Perfil completado.']),
+        '409' => $errEx('El perfil ya estaba completo.', ['Tu perfil ya está completo.']),
+        '422' => $e422,
+    ] + $authErr,
 ]];
 $paths['/auth/logout'] = ['post' => [
     'tags' => ['Auth'], 'operationId' => 'authLogout', 'summary' => 'Cerrar sesión',
@@ -168,6 +199,7 @@ $paths['/jornadas'] = ['get' => $listado('Catálogo', 'Listar jornadas', 'Ordena
 $paths['/partidos'] = ['get' => $listado('Catálogo', 'Listar partidos', 'Incluye local, visitante, estadio, estado y jornada→temporada→liga. Orden por `fecha_hora` (`orden`, por defecto `asc`).', 'Partido', [
     $filtroId('liga_id', 'Filtra por liga.'), $filtroId('temporada_id', 'Filtra por temporada.'), $filtroId('jornada_id', 'Filtra por jornada.'),
     $filtroId('equipo_id', 'Partidos donde el equipo es local o visitante.'),
+    $q('nombre del equipo local, visitante o de la liga'),
     $p('estado', 'query', $str('PROG', ['maxLength' => 4, 'enum' => ['PROG', 'ENJ', 'FIN', 'SUSP']]), 'Código de estado (se convierte a mayúsculas). Valores fuera del enum responden 422.'),
     $desde, $hasta,
     $p('orden', 'query', $str('asc', ['enum' => ['asc', 'desc'], 'default' => 'asc']), 'Orden por fecha y hora.'),
@@ -273,7 +305,7 @@ $paths['/apuestas/{id}/cancelar'] = ['post' => [
 // ---- Pagos
 $paths['/pagos/depositos'] = ['post' => [
     'tags' => ['Pagos'], 'operationId' => 'pagosDeposito', 'summary' => 'Iniciar depósito (Wompi)',
-    'description' => "Crea una transacción `PENDIENTE` con referencia única `PB-<id>-<rand>` y devuelve `data.checkout` con lo necesario para el Widget/Web Checkout de Wompi (llave pública, referencia, monto en centavos, moneda y firma de integridad `SHA256(referencia + centavos + moneda + secreto_integridad)`) más `checkout_url` listo para redirigir. El saldo **no** se acredita aquí: lo hace el webhook (o la sincronización de `GET /pagos/{referencia}`) cuando Wompi aprueba.\n\n`monto` es un string decimal (hasta 10 enteros y 2 decimales); un número JSON también se acepta y se convierte. Mínimo configurable (por defecto 1.00). Soporta `Idempotency-Key`/`idempotency_key` (reintentar devuelve la misma transacción con 201). Con el driver `firebase_function` `checkout` puede ser `null`.{$limites}10/min por usuario.",
+    'description' => "Crea una transacción `PENDIENTE` con referencia única `PB-<id>-<rand>` y devuelve `data.checkout` con lo necesario para el Widget/Web Checkout de Wompi (llave pública, referencia, monto en centavos, moneda y firma de integridad `SHA256(referencia + centavos + moneda + expiration-time + secreto_integridad)`; el `expiration-time` (ISO 8601 UTC, `WOMPI_EXPIRATION_MINUTES`, por defecto 60) se omite de la firma si vale 0) más `checkout_url` listo para redirigir. El saldo **no** se acredita aquí: lo hace el webhook (o la sincronización de `GET /pagos/{referencia}`) cuando Wompi aprueba.\n\n`monto` es un string decimal (hasta 10 enteros y 2 decimales); un número JSON también se acepta y se convierte. Mínimo configurable (por defecto 1.00). Soporta `Idempotency-Key`/`idempotency_key` (reintentar devuelve la misma transacción con 201). Con el driver `firebase_function` `checkout` puede ser `null`.{$limites}10/min por usuario.",
     'security' => $sec, 'parameters' => [$idemHeader],
     'requestBody' => $bodyJson('DepositoRequest', ['monto' => '50000', 'idempotency_key' => '9b1c7e44-52f1-4d0a-8a7b-6c5d4e3f2a10']),
     'responses' => [
@@ -383,6 +415,192 @@ $paths['/admin/apuestas/{id}/anular'] = ['post' => [
     'responses' => ['200' => $ok('Apuesta anulada.', $obj(['id' => $int(105), 'estado' => $str('ANU')], ['id', 'estado']), ['id' => 105, 'estado' => 'ANU']), '404' => $errEx('Apuesta no encontrada.', ['Apuesta no encontrada.']), '409' => $errEx('Ya liquidada.', ['La apuesta ya fue liquidada.'])] + $adminErr,
 ]];
 
+// ---- Retiros
+$retiroEj = ['id' => 14, 'estado' => 'PENDIENTE', 'monto' => '100000.00', 'moneda' => 'COP', 'destino' => ['banco' => 'Bancolombia', 'tipo_cuenta' => 'AHORROS', 'numero_cuenta' => '****7890', 'titular' => 'Laura Gómez Pérez'], 'motivo_rechazo' => null, 'solicitado_en' => '2026-11-10T15:00:00.000000Z', 'resuelto_en' => null];
+$retiroAdminEj = array_merge($retiroEj, ['destino' => ['banco' => 'Bancolombia', 'tipo_cuenta' => 'AHORROS', 'numero_cuenta' => '12345677890', 'titular' => 'Laura Gómez Pérez', 'documento_titular' => '1020304050'], 'usuario_id' => 7, 'admin_id' => null]);
+$paths['/pagos/retiros'] = [
+    'post' => [
+        'tags' => ['Pagos'], 'operationId' => 'pagosRetiroCrear', 'summary' => 'Solicitar un retiro',
+        'description' => "Crea una **solicitud pendiente** (no hay pago automático). Valida: cuenta activa, mayoría de edad, monto entre `retiro.monto_minimo` y `retiro.monto_maximo` (ver `GET /configuracion/limites`), saldo disponible suficiente, máximo de solicitudes pendientes y que el **documento del titular de la cuenta destino coincida con el del usuario**. En una transacción PostgreSQL el monto pasa de `saldo_disponible` a `saldo_retenido` y se registra el movimiento `RETIRO_RESERVADO`. Un administrador la aprueba (`RETIRO_PAGADO`) o rechaza (`RETIRO_LIBERADO`, el saldo vuelve a disponible). Idempotente (`Idempotency-Key`/`idempotency_key`): reintentar devuelve la misma solicitud con 200.{$limites}10/min por usuario.",
+        'security' => $sec, 'parameters' => [$idemHeader],
+        'requestBody' => $bodyJson('RetiroRequest', ['monto' => '100000', 'banco' => 'Bancolombia', 'tipo_cuenta' => 'AHORROS', 'numero_cuenta' => '12345677890', 'titular' => 'Laura Gómez Pérez', 'documento_titular' => '1020304050', 'idempotency_key' => '5d2f8c10-77aa-4c1e-bb21-0e9d8c7b6a51']),
+        'responses' => [
+            '201' => $ok('Solicitud registrada (estado `PENDIENTE`).', $ref('Retiro'), $retiroEj, ['Solicitud de retiro recibida; será revisada por un administrador.']),
+            '200' => $ok('Reintento idempotente: se devuelve la solicitud ya creada.', $ref('Retiro'), $retiroEj),
+            '409' => $errEx('La clave de idempotencia pertenece a otro retiro.', ['La clave de idempotencia ya pertenece a otro retiro.']),
+            '422' => $errEx('Validación o regla de negocio (monto fuera de rango, saldo insuficiente, menor de edad, documento que no coincide, demasiados pendientes).', ['Saldo disponible insuficiente.'], ['errores' => ['monto' => ['Saldo disponible insuficiente.']]]),
+        ] + $authErr,
+    ],
+    'get' => [
+        'tags' => ['Pagos'], 'operationId' => 'pagosRetiroListar', 'summary' => 'Mis solicitudes de retiro',
+        'description' => 'Solicitudes del usuario autenticado, más recientes primero. El número de cuenta se devuelve enmascarado (`****1234`). Paginado.', 'security' => $sec,
+        'parameters' => array_merge($pageParams, [
+            $p('estado', 'query', $str('PENDIENTE', ['enum' => ['PENDIENTE', 'PAGADO', 'RECHAZADO']]), 'Filtra por estado.'), $desde, $hasta,
+        ]),
+        'responses' => ['200' => $ok('Página de solicitudes.', $paged('Retiro'), ['items' => [$retiroEj], 'meta' => $meta(1)]), '422' => $e422] + $authErr,
+    ],
+];
+$paths['/admin/retiros'] = ['get' => [
+    'tags' => [$adminTag], 'operationId' => 'adminRetirosIndex', 'summary' => 'Listar solicitudes de retiro',
+    'description' => 'Solo rol `ADMIN`. Las `PENDIENTE` primero (más antiguas antes) y luego el resto. Incluye el número de cuenta y el documento del titular completos para ejecutar la transferencia.', 'security' => $sec,
+    'parameters' => array_merge($pageParams, [
+        $p('estado', 'query', $str('PENDIENTE', ['enum' => ['PENDIENTE', 'PAGADO', 'RECHAZADO']]), 'Filtra por estado.'),
+        $p('usuario_id', 'query', $int(7, ['minimum' => 1]), 'Filtra por usuario solicitante.'), $desde, $hasta,
+    ]),
+    'responses' => ['200' => $ok('Página de solicitudes.', $paged('RetiroAdmin'), ['items' => [$retiroAdminEj], 'meta' => $meta(1)]), '422' => $e422] + $adminErr,
+]];
+$paths['/admin/retiros/{id}/aprobar'] = ['post' => [
+    'tags' => [$adminTag], 'operationId' => 'adminRetiroAprobar', 'summary' => 'Aprobar un retiro',
+    'description' => "Solo rol `ADMIN`. Marca el retiro `PAGADO`: el saldo retenido se consume (movimiento `RETIRO_PAGADO`). Idempotente: repetir sobre un retiro ya `PAGADO` devuelve 200. Si ya fue `RECHAZADO`: 409.\n\n**TODO:** hoy solo registra la aprobación; la transferencia real (payout) a la cuenta destino debe ejecutarse aparte o integrarse con la pasarela.", 'security' => $sec,
+    'parameters' => [$idPath('Id del retiro.')],
+    'responses' => ['200' => $ok('Retiro pagado.', $ref('RetiroAdmin'), array_merge($retiroAdminEj, ['estado' => 'PAGADO', 'admin_id' => 1, 'resuelto_en' => '2026-11-10T16:00:00.000000Z'])), '404' => $errEx('Retiro no encontrado.', ['Retiro no encontrado.']), '409' => $errEx('Ya fue rechazado.', ['El retiro ya fue resuelto como RECHAZADO.'])] + $adminErr,
+]];
+$paths['/admin/retiros/{id}/rechazar'] = ['post' => [
+    'tags' => [$adminTag], 'operationId' => 'adminRetiroRechazar', 'summary' => 'Rechazar un retiro',
+    'description' => 'Solo rol `ADMIN`. Marca el retiro `RECHAZADO` con un motivo y devuelve el monto de `saldo_retenido` a `saldo_disponible` (movimiento `RETIRO_LIBERADO`). Idempotente; si ya fue `PAGADO`: 409.', 'security' => $sec,
+    'parameters' => [$idPath('Id del retiro.')],
+    'requestBody' => $bodyJson('RechazarRetiroRequest', ['motivo' => 'Datos bancarios inválidos']),
+    'responses' => ['200' => $ok('Retiro rechazado.', $ref('RetiroAdmin'), array_merge($retiroAdminEj, ['estado' => 'RECHAZADO', 'motivo_rechazo' => 'Datos bancarios inválidos', 'admin_id' => 1, 'resuelto_en' => '2026-11-10T16:00:00.000000Z'])), '404' => $errEx('Retiro no encontrado.', ['Retiro no encontrado.']), '409' => $errEx('Ya fue pagado.', ['El retiro ya fue resuelto como PAGADO.']), '422' => $e422] + $adminErr,
+]];
+
+// ---- Admin: usuarios
+$usuarioAdminEj = ['id_usuario' => 7, 'rol_codigo' => 'CLIENTE', 'estado_codigo' => 'ACT', 'fecha_registro' => '2026-10-30T14:05:11.000000Z', 'correo' => 'laura@example.com', 'nombre' => 'Laura Gómez Pérez', 'tipo_documento_codigo' => 'CC', 'numero_documento' => '*******050'];
+$paths['/admin/usuarios'] = ['get' => [
+    'tags' => [$adminTag], 'operationId' => 'adminUsuariosIndex', 'summary' => 'Listar usuarios',
+    'description' => 'Solo rol `ADMIN`. Paginado, más recientes primero. **Sin datos sensibles**: no incluye contraseña, tokens ni celular y el documento va enmascarado.', 'security' => $sec,
+    'parameters' => array_merge($pageParams, [
+        $q('correo, nombre, apellido o documento'),
+        $p('estado', 'query', $str('ACT', ['enum' => ['ACT', 'BLQ', 'SUS']]), 'Estado de la cuenta.'),
+        $p('rol', 'query', $str('CLIENTE', ['enum' => ['CLIENTE', 'ADMIN']]), 'Rol.'),
+        $desde, $hasta,
+    ]),
+    'responses' => ['200' => $ok('Página de usuarios.', $paged('UsuarioAdmin'), ['items' => [$usuarioAdminEj], 'meta' => $meta()]), '422' => $e422] + $adminErr,
+]];
+$paths['/admin/usuarios/{id}/estado'] = ['put' => [
+    'tags' => [$adminTag], 'operationId' => 'adminUsuarioEstado', 'summary' => 'Activar, bloquear o suspender un usuario',
+    'description' => 'Solo rol `ADMIN`. `ACT` activa; `BLQ` bloquea y `SUS` suspende (se revocan todas sus sesiones/tokens y recibe 403 en endpoints autenticados). No puedes cambiar tu propia cuenta. Queda registrado en la auditoría (MongoDB).', 'security' => $sec,
+    'parameters' => [$idPath('Id del usuario.')],
+    'requestBody' => $bodyJson('CambiarEstadoUsuarioRequest', ['estado' => 'BLQ', 'motivo' => 'Actividad sospechosa']),
+    'responses' => ['200' => $ok('Usuario actualizado.', $ref('UsuarioAdmin'), array_merge($usuarioAdminEj, ['estado_codigo' => 'BLQ'])), '404' => $errEx('Usuario no encontrado.', ['Usuario no encontrado.']), '422' => $e422] + $adminErr,
+]];
+
+// ---- 2FA (TOTP)
+$mfaCodigos = ['codigo' => $str('482913', ['description' => 'Código TOTP de 6 dígitos (app autenticadora).', 'pattern' => '^\d{6}$']), 'codigo_recuperacion' => $str('K7M2P-9XQ4T', ['description' => 'Alternativa al TOTP: un código de recuperación (un solo uso). Se acepta con o sin guion y en minúsculas.'])];
+$mfaEstadoEj = ['habilitado' => true, 'activo' => true, 'obligatorio' => false, 'configuracion_pendiente' => false, 'recuperacion_restantes' => 10, 'confirmado_en' => '2026-11-10T12:00:00.000000Z', 'emisor' => 'PlayBoss', 'tiene_contrasena' => true];
+$mfaLimites = "{$limites}bloqueo por fallos: 5 intentos fallidos en 5 min por usuario+IP (y 15 en 15 min por usuario desde cualquier IP) responden 429 con `data.retry_after` (segundos), incluso si el código siguiente es correcto; además 10 solicitudes/min por usuario.";
+$mfaDeshabilitado = $errEx('`MFA_ENABLED=false`: el 2FA está apagado en este servidor.', ['La autenticación en dos pasos no está habilitada.']);
+$paths['/auth/mfa'] = ['get' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaEstado', 'summary' => 'Estado del 2FA',
+    'description' => 'Estado del segundo factor del usuario autenticado. `obligatorio` es `true` si su rol está en `MFA_REQUIRED_ROLES` (por defecto `ADMIN`): sin 2FA activo no puede usar `/admin/*`. `tiene_contrasena` indica si, para desactivar, debe enviar `contrasena` (true) o reautenticar con Google (false).',
+    'security' => $sec,
+    'responses' => ['200' => $ok('Estado actual.', $ref('MfaEstado'), $mfaEstadoEj)] + $authErr,
+]];
+$paths['/auth/mfa/configurar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaConfigurar', 'summary' => 'Iniciar la configuración del 2FA',
+    'description' => "Genera un secreto TOTP nuevo (160 bits, guardado **cifrado** con `APP_KEY`) y devuelve la URI `otpauth://` para el QR y la clave manual. El 2FA **aún no está activo** hasta confirmar con `POST /auth/mfa/activar`. Llamarlo otra vez antes de activar reemplaza el secreto pendiente. 409 si ya está activo; 404 si `MFA_ENABLED=false`.\n\n**Límite:** 10 solicitudes/min.",
+    'security' => $sec,
+    'responses' => [
+        '200' => $ok('Secreto pendiente de confirmar.', $ref('MfaConfiguracion'), ['secreto' => 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', 'otpauth_uri' => 'otpauth://totp/PlayBoss%3Alaura%40example.com?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=PlayBoss&algorithm=SHA1&digits=6&period=30', 'emisor' => 'PlayBoss', 'cuenta' => 'laura@example.com', 'algoritmo' => 'SHA1', 'digitos' => 6, 'periodo' => 30]),
+        '404' => $mfaDeshabilitado, '409' => $errEx('Ya está activo.', ['La autenticación en dos pasos ya está activa.']),
+    ] + $authErr,
+]];
+$paths['/auth/mfa/activar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaActivar', 'summary' => 'Confirmar y activar el 2FA',
+    'description' => "Verifica el primer código TOTP (tolerancia ±1 ventana de 30 s; un código ya usado no vale otra vez), activa el 2FA y devuelve **una sola vez** 10 códigos de recuperación (solo se guardan hasheados). Cierra las demás sesiones abiertas del usuario.{$mfaLimites}",
+    'security' => $sec,
+    'requestBody' => $bodyJson('MfaActivarRequest', ['codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('2FA activo.', $ref('MfaActivado'), ['recuperacion_codigos' => ['K7M2P-9XQ4T', 'H3N8R-5WZ2C'], 'activo' => true] + $mfaEstadoEj, ['Autenticación en dos pasos activada. Guarda tus códigos de recuperación: no se volverán a mostrar.']),
+        '409' => $errEx('No hay configuración pendiente o ya está activo.', ['Primero genera la configuración del segundo paso.']),
+        '422' => $errEx('Código incorrecto, vencido o ya usado.', ['Código incorrecto o vencido.']),
+        '404' => $mfaDeshabilitado,
+    ] + $authErr,
+]];
+$paths['/auth/mfa/desactivar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaDesactivar', 'summary' => 'Desactivar el 2FA',
+    'description' => "Exige reautenticación **y** un código: `contrasena` si la cuenta tiene contraseña; si es una cuenta de Google sin contraseña, `credential` (id_token de Google reciente cuyo `sub` coincida con el vinculado). Más `codigo` (TOTP) o `codigo_recuperacion`. Los roles en `MFA_REQUIRED_ROLES` (ADMIN) no pueden desactivarlo (403): otro administrador debe restablecerlo.{$mfaLimites}",
+    'security' => $sec,
+    'requestBody' => $bodyJson('MfaDesactivarRequest', ['contrasena' => 'Clave-segura-1', 'codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('2FA desactivado.', $ref('MfaEstado'), ['activo' => false] + $mfaEstadoEj, ['Autenticación en dos pasos desactivada.']),
+        '403' => $errEx('Tu rol exige 2FA.', ['Tu rol exige la autenticación en dos pasos; no se puede desactivar. Si perdiste el acceso, pide a otro administrador que la restablezca.']),
+        '409' => $errEx('No estaba activo.', ['La autenticación en dos pasos no está activa.']),
+        '422' => $errEx('Contraseña/Google o código incorrectos.', ['La contraseña no es correcta.']),
+        '404' => $mfaDeshabilitado,
+    ] + ['401' => $e401, '429' => $e429, '500' => $e500],
+]];
+$paths['/auth/mfa/recovery-codes'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaRecoveryCodes', 'summary' => 'Regenerar códigos de recuperación',
+    'description' => "Exige un código vigente (`codigo` o `codigo_recuperacion`). Genera 10 códigos nuevos, devueltos **una sola vez**; los anteriores dejan de servir.{$mfaLimites}",
+    'security' => $sec,
+    'requestBody' => $bodyJson('MfaCodigoRequest', ['codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('Códigos nuevos.', $obj(['recuperacion_codigos' => $arr($str('K7M2P-9XQ4T'))], ['recuperacion_codigos']), ['recuperacion_codigos' => ['K7M2P-9XQ4T', 'H3N8R-5WZ2C']], ['Códigos regenerados. Los anteriores ya no sirven.']),
+        '409' => $errEx('2FA no activo.', ['La autenticación en dos pasos no está activa.']),
+        '422' => $errEx('Código incorrecto, vencido o ya usado.', ['Código incorrecto o vencido.']),
+        '404' => $mfaDeshabilitado,
+    ] + ['401' => $e401, '429' => $e429, '500' => $e500],
+]];
+$paths['/auth/mfa/verificar'] = ['post' => [
+    'tags' => ['MFA'], 'operationId' => 'mfaVerificar', 'summary' => 'Segundo paso del login',
+    'description' => "Canjea el `mfa_token` (devuelto por `POST /auth/login` o `POST /auth/google` cuando el usuario tiene 2FA) más un `codigo` TOTP o `codigo_recuperacion` por el **token Bearer definitivo**. El `mfa_token` vive 5 min, sirve una sola vez, se quema tras 5 fallos y **no es un token de API** (las rutas normales lo rechazan con 401). Si el reto es de Google, la respuesta incluye además `estado`, `perfil_incompleto` y `nuevo` como `/auth/google`. Usar un código de recuperación lo consume (`factor: recuperacion`). Un `mfa_token` inválido o vencido responde siempre el mismo 401, sin revelar si el usuario existe.\n\n**Límite:** 20 solicitudes/min por IP; bloqueo por fallos: 5 en 5 min por usuario+IP (429 con `data.retry_after`).",
+    'security' => [],
+    'requestBody' => $bodyJson('MfaVerificarRequest', ['mfa_token' => 'tVq3...48 caracteres...', 'codigo' => '482913']),
+    'responses' => [
+        '200' => $ok('Sesión iniciada.', $obj(['usuario' => $ref('Usuario'), 'token' => $str('13|xyz...'), 'factor' => $str('totp', ['enum' => ['totp', 'recuperacion']]), 'recuperacion_restantes' => $int(10), 'estado' => $str('ok'), 'perfil_incompleto' => ['type' => 'boolean'], 'nuevo' => ['type' => 'boolean']], ['usuario', 'token', 'factor']), ['usuario' => $usuarioEj, 'token' => '13|Q1w2E3r4T5y6U7i8O9p0AaSsDdFfGgHhJjKkLlZzXx', 'factor' => 'totp', 'recuperacion_restantes' => 10]),
+        '401' => $errEx('Código incorrecto, o `mfa_token` inválido/vencido/ya usado.', ['Código incorrecto o vencido.']),
+        '422' => $e422, '429' => $e429, '500' => $e500,
+    ],
+]];
+$paths['/admin/usuarios/{id}/mfa/restablecer'] = ['post' => [
+    'tags' => [$adminTag], 'operationId' => 'adminUsuarioMfaRestablecer', 'summary' => 'Restablecer el 2FA de un usuario',
+    'description' => 'Solo rol `ADMIN` (con 2FA activo). Borra el secreto y los códigos de recuperación del usuario y **cierra todas sus sesiones**; deberá volver a configurarlo (si su rol lo exige, no podrá usar `/admin/*` hasta hacerlo). `motivo` es obligatorio y queda en la auditoría (`mfa.admin_reset`). No puedes restablecer tu propio 2FA (422).',
+    'parameters' => [$idPath('Id del usuario.')],
+    'requestBody' => $bodyJson('MfaRestablecerRequest', ['motivo' => 'Perdió el teléfono; identidad validada por soporte']),
+    'responses' => ['200' => $ok('2FA restablecido.', $obj(['usuario_id' => $int(7), 'tenia_mfa' => ['type' => 'boolean']], ['usuario_id', 'tenia_mfa']), ['usuario_id' => 7, 'tenia_mfa' => true], ['Autenticación en dos pasos restablecida; el usuario debe volver a iniciar sesión.']), '404' => $errEx('Usuario no encontrado.', ['Usuario no encontrado.']), '422' => $e422] + $adminErr,
+]];
+// ---- Juego responsable
+$limitesEj = ['limites' => ['deposito_diario' => '200000.00', 'deposito_semanal' => null, 'deposito_mensual' => '1000000.00', 'apuesta_diario' => '100000.00', 'apuesta_semanal' => null, 'apuesta_mensual' => null], 'consumo' => ['apuesta_diario' => ['limite' => '100000.00', 'usado' => '30000.00', 'disponible' => '70000.00']], 'autoexclusion' => ['activa' => false, 'hasta' => null]];
+$paths['/perfil/limites'] = [
+    'get' => [
+        'tags' => ['Perfil'], 'operationId' => 'perfilLimitesShow', 'summary' => 'Mis límites de juego responsable',
+        'description' => 'Límites de depósito y de apuesta (diario/semanal/mensual, periodos calendario) y autoexclusión. `null` = sin límite. `consumo` muestra lo usado en el periodo actual (`apuesta_*` y `deposito_*`, cada uno con `limite`, `usado`, `disponible`).', 'security' => $sec,
+        'responses' => ['200' => $ok('Límites actuales.', $ref('LimitesJuego'), $limitesEj)] + $authErr,
+    ],
+    'put' => [
+        'tags' => ['Perfil'], 'operationId' => 'perfilLimitesUpdate', 'summary' => 'Actualizar límites / autoexcluirme',
+        'description' => "Actualiza **solo** las claves enviadas (`null` quita ese límite). Debe cumplirse diario <= semanal <= mensual por tipo. `autoexclusion_dias` (1, 7, 30, 90, 180 o 365) inicia una autoexclusión: mientras dure, **no se puede apostar ni depositar** (422) y no puede acortarse ni retirarse (solo ampliarse). Los límites se aplican en `POST /apuestas` y `POST /pagos/depositos` (422 `Superas tu límite diario...`).{$limites}10/min por usuario.", 'security' => $sec,
+        'requestBody' => $bodyJson('ActualizarLimitesRequest', ['apuesta_diario' => '100000', 'deposito_mensual' => '1000000', 'deposito_semanal' => null]),
+        'responses' => ['200' => $ok('Límites actualizados.', $ref('LimitesJuego'), $limitesEj, ['Límites actualizados.']), '422' => $e422] + $authErr,
+    ],
+];
+
+// ---- Contacto y configuración
+$paths['/contacto'] = ['post' => [
+    'tags' => ['Contacto'], 'operationId' => 'contactoEnviar', 'summary' => 'Enviar mensaje de contacto',
+    'description' => "**Público**. Valida y guarda el mensaje en MongoDB (`contact_messages`) y lo envía por correo al destino configurado (`CONTACT_TO_ADDRESS`, por defecto `MAIL_FROM_ADDRESS`) con `Reply-To` del remitente. Responde 201 si al menos una de las dos vías funcionó; 503 si ambas fallan.{$limites}5/min por IP.", 'security' => [],
+    'requestBody' => $bodyJson('ContactoRequest', ['nombre' => 'Laura Gómez', 'correo' => 'laura@example.com', 'asunto' => 'Consulta sobre retiros', 'mensaje' => 'Hola, quisiera saber cuánto tarda un retiro.']),
+    'responses' => ['201' => $ok('Mensaje recibido.', ['type' => 'array', 'items' => new stdClass(), 'maxItems' => 0], [], ['Mensaje recibido. Te responderemos pronto.']), '422' => $e422, '429' => $e429, '503' => $errEx('No se pudo guardar ni enviar.', ['No pudimos registrar tu mensaje. Intenta de nuevo más tarde.']), '500' => $e500],
+]];
+$paths['/configuracion/limites'] = ['get' => [
+    'tags' => ['Catálogo'], 'operationId' => 'configuracionLimites', 'summary' => 'Límites de negocio',
+    'description' => "Monto mínimo/máximo de apuesta, máximo de selecciones, rango de recarga y de retiro. El front debe leerlos de aquí en vez de fijarlos. Los montos de apuesta son cotas globales: cada mercado (regla en Mongo) puede ser más estricto y el servidor responde 422 con el rango exacto. Público.{$limites}120/min por IP.", 'security' => [],
+    'responses' => ['200' => $ok('Límites vigentes.', $ref('ConfiguracionLimites'), ['moneda' => 'COP', 'apuestas' => ['monto_minimo' => '1000.00', 'monto_maximo' => '2000000.00', 'max_selecciones' => 10, 'edad_minima' => 18, 'limite_diario' => '5000000.00', 'max_apuestas_dia' => 100, 'nota' => 'Cotas globales.'], 'recarga' => ['monto_minimo' => '1.00', 'monto_maximo' => '10000000.00'], 'retiro' => ['monto_minimo' => '10000.00', 'monto_maximo' => '5000000.00', 'max_pendientes' => 3]]), '429' => $e429, '500' => $e500],
+]];
+$imagenResp = fn (string $desc): array => ['200' => ['description' => $desc, 'content' => ['image/*' => ['schema' => ['type' => 'string', 'format' => 'binary']]]], '404' => $e404, '429' => $e429, '500' => $e500];
+$paths['/media/equipos/{id}/escudo'] = ['get' => [
+    'tags' => ['Catálogo'], 'operationId' => 'mediaEscudo', 'summary' => 'Escudo de un equipo (imagen)',
+    'description' => "**Público**, para usar directo en `<img src>` (es el `escudo_url` de los equipos). Sirve el archivo de Google Drive (`escudo_drive_id`) con caché; si el equipo no tiene archivo o Drive no responde, devuelve un escudo SVG generado con sus siglas y colores. Respuesta binaria con `Cache-Control: public`.{$limites}120/min por IP.", 'security' => [],
+    'parameters' => [$idPath('Id del equipo (`id_equipo`).')],
+    'responses' => $imagenResp('Imagen del escudo (PNG/JPG/SVG).'),
+]];
+$paths['/media/ligas/{id}/logo'] = ['get' => [
+    'tags' => ['Catálogo'], 'operationId' => 'mediaLogo', 'summary' => 'Logo de una liga (imagen)',
+    'description' => "**Público**, es el `logo_url` de las ligas. Mismo comportamiento que el escudo de equipo (Drive con caché o SVG generado).{$limites}120/min por IP.", 'security' => [],
+    'parameters' => [$idPath('Id de la liga (`id_liga`).')],
+    'responses' => $imagenResp('Imagen del logo (PNG/JPG/SVG).'),
+]];
+
 // ---------------------------------------------------------------- componentes
 $monto = fn (string $ex): array => ['type' => 'string', 'pattern' => '^\d+(\.\d{1,2})?$', 'example' => $ex];
 $fecha = ['type' => 'string', 'format' => 'date-time', 'example' => '2026-10-30T15:00:00.000000Z'];
@@ -406,6 +624,10 @@ $schemas = [
         'tipo_documento_codigo' => $str('CC'), 'numero_documento' => $str('1020304050'), 'celular' => $nullable($str('3001234567')),
         'fecha_nacimiento' => ['type' => 'string', 'format' => 'date', 'example' => '1995-04-12'], 'correo' => ['type' => 'string', 'format' => 'email', 'example' => 'laura@example.com'],
         'foto_drive_id' => $nullable($str('1AbCdEfGhIjKlMnOp', ['description' => 'Id de la foto en Google Drive; la imagen se obtiene con `GET /perfil/foto`.'])),
+        'foto_url' => $nullable($str('https://lh3.googleusercontent.com/a/...', ['description' => 'Foto de Google (solo usuarios creados con Google).'])),
+        'auth_proveedor' => $str('LOCAL', ['enum' => ['LOCAL', 'GOOGLE'], 'description' => '`GOOGLE` = creado con Google y sin contraseña propia (puede fijarla con `/auth/recuperar`).']),
+        'mfa_activo' => ['type' => 'boolean', 'example' => false, 'description' => 'El usuario tiene el 2FA activo.'], 'mfa_obligatorio' => ['type' => 'boolean', 'example' => false, 'description' => 'Su rol exige 2FA (`MFA_REQUIRED_ROLES`): si `mfa_obligatorio` y no `mfa_activo`, `/admin/*` responde 403 con `data.mfa_requerido`.'],
+        'perfil_completo' => ['type' => 'boolean', 'example' => true, 'description' => 'false si faltan fecha de nacimiento, documento o apellido: debe llamar a `PUT /auth/google/completar` antes de apostar o depositar.'],
     ], ['id_usuario', 'rol_codigo', 'estado_codigo', 'correo']),
     'RegistroRequest' => $obj([
         'primer_nombre' => $str('Laura', ['maxLength' => 50]), 'segundo_nombre' => $nullable($str('', ['maxLength' => 50])),
@@ -418,14 +640,24 @@ $schemas = [
         'contrasena' => ['type' => 'string', 'format' => 'password', 'minLength' => 8, 'example' => 'Clave-segura-1'],
         'contrasena_confirmation' => ['type' => 'string', 'format' => 'password', 'description' => 'Debe ser igual a `contrasena`.', 'example' => 'Clave-segura-1'],
         'foto' => ['type' => 'string', 'format' => 'binary', 'description' => 'Foto de perfil (jpg, png o webp, máx. 3 MB). Se guarda en Google Drive.'],
+        'recaptcha_token' => $recaptcha,
     ], ['primer_nombre', 'primer_apellido', 'tipo_documento_codigo', 'numero_documento', 'correo', 'fecha_nacimiento', 'contrasena', 'contrasena_confirmation', 'foto']),
-    'LoginRequest' => $obj(['correo' => ['type' => 'string', 'format' => 'email', 'example' => 'laura@example.com'], 'contrasena' => ['type' => 'string', 'format' => 'password', 'example' => 'Clave-segura-1']], ['correo', 'contrasena']),
-    'RecuperarRequest' => $obj(['correo' => ['type' => 'string', 'format' => 'email', 'maxLength' => 120, 'example' => 'laura@example.com']], ['correo']),
+    'LoginRequest' => $obj(['correo' => ['type' => 'string', 'format' => 'email', 'example' => 'laura@example.com'], 'contrasena' => ['type' => 'string', 'format' => 'password', 'example' => 'Clave-segura-1'], 'recaptcha_token' => $recaptcha], ['correo', 'contrasena']),
+    'GoogleLoginRequest' => $obj(['credential' => $str('eyJhbGciOiJSUzI1NiIs...', ['description' => 'id_token (JWT) que entrega Google Identity Services en el campo `credential`.', 'maxLength' => 4096])], ['credential']),
+    'CompletarPerfilRequest' => $obj([
+        'primer_nombre' => $str('Laura', ['maxLength' => 50]), 'segundo_nombre' => $nullable($str('', ['maxLength' => 50])),
+        'primer_apellido' => $str('Gómez', ['maxLength' => 50]), 'segundo_apellido' => $nullable($str('', ['maxLength' => 50])),
+        'tipo_documento_codigo' => $str('CC'), 'numero_documento' => $str('1020304050', ['maxLength' => 20, 'description' => 'Único por tipo de documento.']),
+        'celular' => $nullable($str('3001234567', ['maxLength' => 20, 'pattern' => '^[0-9+\s\-]{7,20}$'])),
+        'fecha_nacimiento' => ['type' => 'string', 'format' => 'date', 'example' => '1995-04-12', 'description' => 'Debe ser mayor de edad (`BET_MIN_AGE`).'],
+    ], ['primer_apellido', 'tipo_documento_codigo', 'numero_documento', 'fecha_nacimiento']),
+    'RecuperarRequest' => $obj(['correo' => ['type' => 'string', 'format' => 'email', 'maxLength' => 120, 'example' => 'laura@example.com'], 'recaptcha_token' => $recaptcha], ['correo']),
     'RestablecerRequest' => $obj([
         'correo' => ['type' => 'string', 'format' => 'email', 'maxLength' => 120, 'example' => 'laura@example.com'],
         'codigo' => $str('482913', ['pattern' => '^\d{6}$', 'description' => 'Código de 6 dígitos recibido por correo.']),
         'contrasena' => ['type' => 'string', 'format' => 'password', 'minLength' => 8, 'maxLength' => 100, 'example' => 'Nueva-clave-2'],
         'contrasena_confirmation' => ['type' => 'string', 'format' => 'password', 'example' => 'Nueva-clave-2'],
+        'recaptcha_token' => $recaptcha,
     ], ['correo', 'codigo', 'contrasena', 'contrasena_confirmation']),
     'ActualizarPerfilRequest' => $obj([
         'primer_nombre' => $str('Laura', ['maxLength' => 50]), 'segundo_nombre' => $nullable($str('', ['maxLength' => 50])),
@@ -441,10 +673,10 @@ $schemas = [
     'Servicio' => $obj(['codigo' => $str('FUTBOL'), 'nombre' => $str('Fútbol'), 'activo' => ['type' => 'boolean', 'example' => true]]),
     'Pais' => $obj(['codigo_iso' => $str('CO'), 'nombre' => $str('Colombia')]),
     'Ciudad' => $obj(['id_ciudad' => $int(2), 'nombre' => $str('Medellín'), 'pais_codigo' => $str('CO')]),
-    'Liga' => $obj(['id_liga' => $int(1), 'servicio_codigo' => $str('FUTBOL'), 'pais_codigo' => $str('CO'), 'nombre' => $str('Liga BetPlay'), 'logo_drive_id' => $nullable($str()), 'activa' => ['type' => 'boolean'], 'pais' => $ref('Pais'), 'servicio' => $ref('Servicio')], [], ['description' => '`pais` va en el catálogo; `pais` y `servicio` en el CRUD admin.']),
+    'Liga' => $obj(['id_liga' => $int(1), 'logo_url' => $str('http://localhost/api/media/ligas/1/logo', ['description' => 'URL pública de la imagen (Drive o SVG generado).']), 'servicio_codigo' => $str('FUTBOL'), 'pais_codigo' => $str('CO'), 'nombre' => $str('Liga BetPlay'), 'logo_drive_id' => $nullable($str()), 'activa' => ['type' => 'boolean'], 'pais' => $ref('Pais'), 'servicio' => $ref('Servicio')], [], ['description' => '`pais` va en el catálogo; `pais` y `servicio` en el CRUD admin.']),
     'Temporada' => $obj(['id_temporada' => $int(3), 'liga_id' => $int(1), 'nombre' => $str('2026'), 'fecha_inicio' => ['type' => 'string', 'format' => 'date'], 'fecha_fin' => ['type' => 'string', 'format' => 'date']]),
     'Estadio' => $obj(['id_estadio' => $int(4), 'nombre' => $str('Atanasio Girardot'), 'ciudad_id' => $int(2), 'capacidad' => $nullable($int(45000)), 'direccion' => $nullable($str()), 'ciudad' => $ref('Ciudad')]),
-    'Equipo' => $obj(['id_equipo' => $int(5), 'nombre' => $str('Atlético Nacional'), 'escudo_drive_id' => $nullable($str()), 'ciudad_id' => $int(2), 'estadio_id' => $nullable($int(4)), 'fecha_fundacion' => $nullable(['type' => 'string', 'format' => 'date']), 'ciudad' => $ref('Ciudad'), 'estadio' => $ref('Estadio')]),
+    'Equipo' => $obj(['id_equipo' => $int(5), 'escudo_url' => $str('http://localhost/api/media/equipos/5/escudo', ['description' => 'URL pública de la imagen (Drive o SVG generado).']), 'nombre' => $str('Atlético Nacional'), 'escudo_drive_id' => $nullable($str()), 'ciudad_id' => $int(2), 'estadio_id' => $nullable($int(4)), 'fecha_fundacion' => $nullable(['type' => 'string', 'format' => 'date']), 'ciudad' => $ref('Ciudad'), 'estadio' => $ref('Estadio')]),
     'Jugador' => $obj(['id_jugador' => $int(88), 'primer_nombre' => $str('Juan'), 'segundo_nombre' => $nullable($str()), 'primer_apellido' => $str('Pérez'), 'segundo_apellido' => $nullable($str()), 'fecha_nacimiento' => $nullable(['type' => 'string', 'format' => 'date']), 'pais_codigo' => $nullable($str('CO')), 'posicion_codigo' => $str('DEL'), 'equipo_actual_id' => $nullable($int(5)), 'dorsal' => $nullable($int(9)), 'foto_drive_id' => $nullable($str()), 'equipo' => $ref('Equipo'), 'posicion' => $obj(['codigo' => $str('DEL'), 'nombre' => $str('Delantero')]), 'pais' => $ref('Pais')]),
     'Jornada' => $obj(['id_jornada' => $int(21), 'temporada_id' => $int(3), 'numero' => $int(10), 'fecha_inicio' => ['type' => 'string', 'format' => 'date'], 'fecha_fin' => ['type' => 'string', 'format' => 'date']]),
     'Partido' => $obj([
@@ -459,7 +691,7 @@ $schemas = [
 
     'Cuenta' => $obj(['saldo_disponible' => $monto('120000.00'), 'saldo_retenido' => $monto('10000.00'), 'moneda' => $str('COP')], ['saldo_disponible', 'saldo_retenido', 'moneda']),
     'Movimiento' => $obj(['id' => $int(310), 'tipo' => $str('DEPOSITO'), 'monto' => $monto('50000.00'), 'saldo_disponible' => $monto('120000.00'), 'saldo_retenido' => $monto('10000.00'), 'apuesta_id' => $nullable($int(105)), 'descripcion' => $nullable($str('DEPOSITO')), 'fecha' => $fecha]),
-    'ApuestaSeleccion' => $obj(['partido_id' => $int(12), 'market_id' => $str('665f1c2e8f1b2a0012345678'), 'mercado_codigo' => $nullable($str('1X2')), 'mercado' => $nullable($str('Resultado final')), 'selection_code' => $str('1'), 'etiqueta' => $str('Local'), 'cuota' => $str('2.1000', ['description' => 'Cuota congelada al apostar.']), 'resultado' => $nullable($str('GAN', ['description' => 'Resultado de la selección una vez liquidada (p. ej. GAN, PER, VOID); null mientras esté pendiente.']))]),
+    'ApuestaSeleccion' => $obj(['partido_id' => $int(12), 'partido' => $nullable($str('Atlético Nacional vs Millonarios', ['description' => 'Local vs visitante.'])), 'local' => $nullable($str('Atlético Nacional')), 'visitante' => $nullable($str('Millonarios')), 'local_escudo_url' => $nullable($str('http://localhost/api/media/equipos/5/escudo')), 'visitante_escudo_url' => $nullable($str('http://localhost/api/media/equipos/6/escudo')), 'liga' => $nullable($str('Liga BetPlay')), 'fecha_partido' => $nullable($fecha), 'estado_partido' => $nullable($str('PROG')), 'opcion' => $str('Atlético Nacional', ['description' => 'Opción legible elegida (igual a `etiqueta`).']), 'market_id' => $str('665f1c2e8f1b2a0012345678'), 'mercado_codigo' => $nullable($str('1X2')), 'mercado' => $nullable($str('Resultado final')), 'selection_code' => $str('1'), 'etiqueta' => $str('Local'), 'cuota' => $str('2.1000', ['description' => 'Cuota congelada al apostar.']), 'resultado' => $nullable($str('GAN', ['description' => 'Resultado de la selección una vez liquidada (p. ej. GAN, PER, VOID); null mientras esté pendiente.']))]),
     'Apuesta' => $obj([
         'id' => $int(105), 'tipo' => $str('COMBINADA', ['enum' => ['SIMPLE', 'COMBINADA']]), 'estado' => $str('PEND', ['enum' => ['PEND', 'GAN', 'PER', 'ANU', 'CASH'], 'description' => 'PEND pendiente, GAN ganada, PER perdida, ANU anulada, CASH cobrada anticipadamente.']),
         'monto' => $monto('10000.00'), 'cuota_total' => $str('3.8850'), 'pago_potencial' => $monto('38850.00'), 'creada_en' => $fecha, 'liquidada_en' => $nullable($fecha),
@@ -538,6 +770,59 @@ $schemas = [
             'tiros_puerta_local' => $int(6, ['minimum' => 0, 'description' => '<= tiros_local']), 'tiros_puerta_visitante' => $int(3, ['minimum' => 0, 'description' => '<= tiros_visitante']),
         ]),
     ], ['goles_local', 'goles_visitante']),
+    'RetiroDestino' => $obj(['banco' => $str('Bancolombia'), 'tipo_cuenta' => $str('AHORROS', ['enum' => ['AHORROS', 'CORRIENTE', 'NEQUI', 'DAVIPLATA']]), 'numero_cuenta' => $str('****7890', ['description' => 'Enmascarado para el cliente; completo para el administrador.']), 'titular' => $str('Laura Gómez Pérez'), 'documento_titular' => $str('1020304050', ['description' => 'Solo en la vista de administrador.'])]),
+    'Retiro' => $obj([
+        'id' => $int(14), 'estado' => $str('PENDIENTE', ['enum' => ['PENDIENTE', 'PAGADO', 'RECHAZADO']]), 'monto' => $monto('100000.00'), 'moneda' => $str('COP'),
+        'destino' => $ref('RetiroDestino'), 'motivo_rechazo' => $nullable($str('Datos bancarios inválidos')), 'solicitado_en' => $fecha, 'resuelto_en' => $nullable($fecha),
+    ], ['id', 'estado', 'monto', 'destino', 'solicitado_en']),
+    'RetiroAdmin' => $obj([
+        'id' => $int(14), 'estado' => $str('PENDIENTE', ['enum' => ['PENDIENTE', 'PAGADO', 'RECHAZADO']]), 'monto' => $monto('100000.00'), 'moneda' => $str('COP'),
+        'destino' => $ref('RetiroDestino'), 'motivo_rechazo' => $nullable($str()), 'solicitado_en' => $fecha, 'resuelto_en' => $nullable($fecha),
+        'usuario_id' => $int(7), 'admin_id' => $nullable($int(1)),
+    ], ['id', 'estado', 'monto', 'destino', 'usuario_id']),
+    'RetiroRequest' => $obj([
+        'monto' => $str('100000', ['pattern' => '^\d{1,10}(\.\d{1,2})?$', 'description' => 'String decimal.']),
+        'banco' => $str('Bancolombia', ['maxLength' => 60]), 'tipo_cuenta' => $str('AHORROS', ['enum' => ['AHORROS', 'CORRIENTE', 'NEQUI', 'DAVIPLATA']]),
+        'numero_cuenta' => $str('12345677890', ['pattern' => '^\d{6,20}$']), 'titular' => $str('Laura Gómez Pérez', ['minLength' => 3, 'maxLength' => 120]),
+        'documento_titular' => $str('1020304050', ['pattern' => '^\d{5,15}$', 'description' => 'Debe coincidir con el documento del usuario.']),
+        'codigo_mfa' => $str('482913', ['description' => 'Código TOTP vigente. **Obligatorio si el usuario tiene 2FA activo** (o `codigo_recuperacion`); si falta, 403 con `data.mfa_codigo_requerido: true`; si es incorrecto, 422. Si su rol exige 2FA y no lo tiene, 403 con `data.mfa_requerido`.']),
+        'codigo_recuperacion' => $str('K7M2P-9XQ4T', ['description' => 'Alternativa a `codigo_mfa`.']),
+        'idempotency_key' => $idem,
+    ], ['monto', 'banco', 'tipo_cuenta', 'numero_cuenta', 'titular', 'documento_titular']),
+    'MfaEstado' => $obj(['habilitado' => ['type' => 'boolean'], 'activo' => ['type' => 'boolean'], 'obligatorio' => ['type' => 'boolean', 'description' => 'El rol del usuario exige 2FA.'], 'configuracion_pendiente' => ['type' => 'boolean'], 'recuperacion_restantes' => $int(10), 'confirmado_en' => $nullable($fecha), 'emisor' => $str('PlayBoss'), 'tiene_contrasena' => ['type' => 'boolean']], ['habilitado', 'activo', 'obligatorio']),
+    'MfaConfiguracion' => $obj(['secreto' => $str('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', ['description' => 'Clave base32 para ingreso manual.']), 'otpauth_uri' => $str('otpauth://totp/...', ['description' => 'Contenido del código QR.']), 'emisor' => $str('PlayBoss'), 'cuenta' => $str('laura@example.com'), 'algoritmo' => $str('SHA1'), 'digitos' => $int(6), 'periodo' => $int(30)], ['secreto', 'otpauth_uri']),
+    'MfaActivado' => $obj(['recuperacion_codigos' => $arr($str('K7M2P-9XQ4T'), ['description' => '10 códigos de un solo uso; se muestran solo en esta respuesta.']), 'habilitado' => ['type' => 'boolean'], 'activo' => ['type' => 'boolean'], 'obligatorio' => ['type' => 'boolean'], 'recuperacion_restantes' => $int(10), 'confirmado_en' => $nullable($fecha)], ['recuperacion_codigos', 'activo']),
+    'MfaActivarRequest' => $obj(['codigo' => $mfaCodigos['codigo']], ['codigo']),
+    'MfaCodigoRequest' => $obj($mfaCodigos, [], ['description' => 'Al menos uno de `codigo` o `codigo_recuperacion`.']),
+    'MfaDesactivarRequest' => $obj(['contrasena' => $str('Clave-segura-1', ['format' => 'password', 'description' => 'Requerida si la cuenta tiene contraseña.']), 'credential' => $str('eyJhbGciOiJSUzI1NiIs...', ['description' => 'id_token de Google (solo cuentas sin contraseña).'])] + $mfaCodigos, [], ['description' => 'Reautenticación (`contrasena` o `credential`) más `codigo` o `codigo_recuperacion`.']),
+    'MfaVerificarRequest' => $obj(['mfa_token' => $str('tVq3...', ['description' => 'Token de reto devuelto por login/Google.'])] + $mfaCodigos, ['mfa_token'], ['description' => 'Además, `codigo` o `codigo_recuperacion`.']),
+    'MfaRestablecerRequest' => $obj(['motivo' => $str('Perdió el teléfono', ['minLength' => 5, 'maxLength' => 300])], ['motivo']),
+    'RechazarRetiroRequest' => $obj(['motivo' => $str('Datos bancarios inválidos', ['minLength' => 3, 'maxLength' => 200])], ['motivo']),
+    'UsuarioAdmin' => $obj([
+        'id_usuario' => $int(7), 'rol_codigo' => $str('CLIENTE'), 'estado_codigo' => $str('ACT', ['description' => 'ACT activo, BLQ bloqueado, SUS suspendido.']), 'fecha_registro' => $fecha,
+        'correo' => $nullable($str('laura@example.com')), 'nombre' => $nullable($str('Laura Gómez Pérez')), 'tipo_documento_codigo' => $nullable($str('CC')), 'numero_documento' => $nullable($str('*******050', ['description' => 'Enmascarado (solo los últimos 3 dígitos).'])),
+    ], ['id_usuario', 'rol_codigo', 'estado_codigo']),
+    'CambiarEstadoUsuarioRequest' => $obj(['estado' => $str('BLQ', ['enum' => ['ACT', 'BLQ', 'SUS']]), 'motivo' => $nullable($str('Actividad sospechosa', ['maxLength' => 200]))], ['estado']),
+    'LimitesJuego' => $obj([
+        'limites' => ['type' => 'object', 'description' => 'Claves: `deposito_|apuesta_` + `diario|semanal|mensual`. Monto string o `null` (sin límite).', 'additionalProperties' => $nullable($monto('100000.00'))],
+        'consumo' => ['type' => 'object', 'description' => 'Por cada clave de límite: `{limite, usado, disponible}` del periodo calendario actual.', 'additionalProperties' => $obj(['limite' => $nullable($monto('100000.00')), 'usado' => $monto('30000.00'), 'disponible' => $nullable($monto('70000.00'))])],
+        'autoexclusion' => $obj(['activa' => ['type' => 'boolean'], 'hasta' => $nullable($fecha)], ['activa', 'hasta']),
+    ], ['limites', 'consumo', 'autoexclusion']),
+    'ActualizarLimitesRequest' => $obj([
+        'deposito_diario' => $nullable($monto('200000')), 'deposito_semanal' => $nullable($monto('500000')), 'deposito_mensual' => $nullable($monto('1000000')),
+        'apuesta_diario' => $nullable($monto('100000')), 'apuesta_semanal' => $nullable($monto('300000')), 'apuesta_mensual' => $nullable($monto('800000')),
+        'autoexclusion_dias' => $int(30, ['enum' => [1, 7, 30, 90, 180, 365], 'description' => 'Inicia/amplía la autoexclusión; no se puede acortar.']),
+    ], [], ['description' => 'Todas las claves son opcionales: solo se cambian las enviadas.']),
+    'ContactoRequest' => $obj([
+        'nombre' => $str('Laura Gómez', ['minLength' => 2, 'maxLength' => 100]), 'correo' => ['type' => 'string', 'format' => 'email', 'maxLength' => 150, 'example' => 'laura@example.com'],
+        'asunto' => $str('Consulta', ['minLength' => 3, 'maxLength' => 150]), 'mensaje' => $str('Hola, tengo una duda.', ['minLength' => 10, 'maxLength' => 2000]),
+    ], ['nombre', 'correo', 'asunto', 'mensaje']),
+    'ConfiguracionLimites' => $obj([
+        'moneda' => $str('COP'),
+        'apuestas' => $obj(['monto_minimo' => $monto('1000.00'), 'monto_maximo' => $monto('2000000.00'), 'max_selecciones' => $int(10), 'edad_minima' => $int(18), 'limite_diario' => $monto('5000000.00'), 'max_apuestas_dia' => $int(100), 'nota' => $str()]),
+        'recarga' => $obj(['monto_minimo' => $monto('1.00'), 'monto_maximo' => $monto('10000000.00')]),
+        'retiro' => $obj(['monto_minimo' => $monto('10000.00'), 'monto_maximo' => $monto('5000000.00'), 'max_pendientes' => $int(3)]),
+    ]),
     'LiquidacionResultado' => $obj(['partido_id' => $int(12), 'apuestas_liquidadas' => $int(37), 'mercados_sin_resolver' => $arr($str('CORNERS_OU_9_5'), ['description' => 'Mercados que quedaron pendientes por falta de resolución.'])], ['partido_id', 'apuestas_liquidadas', 'mercados_sin_resolver']),
 ];
 
@@ -555,11 +840,13 @@ $respuestas = [
 // Tags
 $tags = [
     ['name' => 'Auth', 'description' => 'Registro, login, sesión y recuperación de contraseña.'],
+    ['name' => 'MFA', 'description' => 'Autenticación en dos pasos (TOTP, apps tipo Google Authenticator/Authy): configurar, activar, desactivar, códigos de recuperación y verificación del login.'],
     ['name' => 'Catálogo', 'description' => 'Datos deportivos públicos de solo lectura (MySQL) y mercados/cuotas activas (MongoDB). 120 solicitudes/min por IP.'],
     ['name' => 'Perfil', 'description' => 'Datos personales y contraseña del usuario autenticado.'],
     ['name' => 'Cuenta', 'description' => 'Saldo y movimientos contables (PostgreSQL).'],
     ['name' => 'Apuestas', 'description' => 'Crear, consultar y cancelar apuestas. 20/min por usuario en operaciones de escritura. Admite `Idempotency-Key`.'],
     ['name' => 'Pagos', 'description' => 'Depósitos con Wompi (checkout + webhook). 10/min por usuario.'],
+    ['name' => 'Contacto', 'description' => 'Formulario público de contacto (MongoDB + correo). 5/min por IP.'],
     ['name' => 'Admin', 'description' => 'Administración (rol `ADMIN`): CRUD de equipos, ligas, partidos, mercados y reglas; liquidación y anulación de apuestas.'],
 ];
 

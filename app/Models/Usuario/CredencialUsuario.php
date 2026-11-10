@@ -13,7 +13,7 @@ class CredencialUsuario extends SqlServerModel
     public $timestamps = false;
     public $incrementing = false;
 
-    protected $hidden = ['contrasena_hash'];
+    protected $hidden = ['contrasena_hash', 'google_sub'];
 
     public function usuario(): BelongsTo
     {

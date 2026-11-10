@@ -27,3 +27,5 @@ Homestead.yaml
 Thumbs.db
 /.env.nube
 /storage/app/private/nube/
+/docs/credenciales/
+/CREDENCIALES.md

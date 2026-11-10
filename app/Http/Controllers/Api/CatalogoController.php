@@ -90,6 +90,13 @@ class CatalogoController extends Controller
         $q = Partido::query()->with(['local', 'visitante', 'estadio', 'estado', 'jornada.temporada.liga'])
             ->orderBy('fecha_hora', $r->input('orden', 'asc'));
 
+        if ($r->filled('q')) {
+            $like = '%' . $this->like($r->string('q')) . '%';
+            $q->where(fn ($w) => $w
+                ->whereHas('local', fn ($e) => $e->where('nombre', 'like', $like))
+                ->orWhereHas('visitante', fn ($e) => $e->where('nombre', 'like', $like))
+                ->orWhereHas('jornada.temporada.liga', fn ($l) => $l->where('nombre', 'like', $like)));
+        }
         $r->filled('jornada_id') && $q->where('jornada_id', $r->integer('jornada_id'));
         $r->filled('estado') && $q->where('estado_codigo', strtoupper($r->string('estado')));
         $r->filled('desde') && $q->where('fecha_hora', '>=', $r->date('desde')->startOfDay());

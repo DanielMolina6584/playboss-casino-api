@@ -23,6 +23,7 @@ class PerfilUsuario extends SqlServerModel
         'celular',
         'fecha_nacimiento',
         'foto_drive_id',
+        'foto_url',
     ];
 
     protected function casts(): array

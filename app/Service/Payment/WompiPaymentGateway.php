@@ -27,15 +27,17 @@ class WompiPaymentGateway implements PaymentGateway, CheckoutDataProvider, Consu
     {
         $reference = 'PB-' . $payload['transaction_id'] . '-' . strtoupper(Str::random(8));
         $cents = $this->aCentavos((string) $payload['amount']);
-        $checkout = $this->datosCheckout($reference, $cents, (string) $payload['currency']);
+        $minutos = (int) config('services.wompi.expiration_minutes', 60);
+        $expira = $minutos > 0 ? gmdate('Y-m-d\TH:i:s.000\Z', time() + $minutos * 60) : null;
+        $checkout = $this->datosCheckout($reference, $cents, (string) $payload['currency'], $expira);
 
         return ['reference' => $reference, 'status' => 'PENDING', 'checkout_url' => $checkout['checkout_url']];
     }
 
-    public function datosCheckout(string $reference, int $amountInCents, string $currency): array
+    public function datosCheckout(string $reference, int $amountInCents, string $currency, ?string $expiration = null): array
     {
         $publicKey = $this->config('public_key');
-        $signature = $this->firmaIntegridad($reference, $amountInCents, $currency);
+        $signature = $this->firmaIntegridad($reference, $amountInCents, $currency, $expiration);
         $redirect = config('services.wompi.redirect_url');
 
         $query = [
@@ -48,6 +50,9 @@ class WompiPaymentGateway implements PaymentGateway, CheckoutDataProvider, Consu
         if (is_string($redirect) && $redirect !== '') {
             $query['redirect-url'] = $redirect;
         }
+        if ($expiration !== null) {
+            $query['expiration-time'] = $expiration;
+        }
 
         return [
             'provider' => 'wompi',
@@ -55,16 +60,17 @@ class WompiPaymentGateway implements PaymentGateway, CheckoutDataProvider, Consu
             'reference' => $reference,
             'amount_in_cents' => $amountInCents,
             'currency' => $currency,
+            'expiration_time' => $expiration,
             'signature_integrity' => $signature,
             'redirect_url' => $redirect ?: null,
             'checkout_url' => rtrim((string) config('services.wompi.checkout_url', 'https://checkout.wompi.co/p/'), '?') . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986),
         ];
     }
 
-    /** SHA256(referencia + monto en centavos + moneda + secreto de integridad). */
-    public function firmaIntegridad(string $reference, int $amountInCents, string $currency): string
+    /** SHA256(referencia + centavos + moneda [+ expiration-time ISO 8601 UTC] + secreto de integridad). */
+    public function firmaIntegridad(string $reference, int $amountInCents, string $currency, ?string $expiration = null): string
     {
-        return hash('sha256', $reference . $amountInCents . $currency . $this->config('integrity_secret'));
+        return hash('sha256', $reference . $amountInCents . $currency . ($expiration ?? '') . $this->config('integrity_secret'));
     }
 
     /**
@@ -147,7 +153,7 @@ class WompiPaymentGateway implements PaymentGateway, CheckoutDataProvider, Consu
 
         return [
             'verified' => $status !== '',
-            'event_id' => 'wompi:' . $tx['id'] . ':' . strtoupper((string) $tx['status']),
+            'event_id' => 'wompi:' . ($tx['id'] ?? '') . ':' . strtoupper((string) $tx['status']),
             'reference' => (string) ($tx['reference'] ?? ''),
             'status' => $status,
             'amount' => intdiv($cents, 100) . '.' . str_pad((string) ($cents % 100), 2, '0', STR_PAD_LEFT),
@@ -157,7 +163,12 @@ class WompiPaymentGateway implements PaymentGateway, CheckoutDataProvider, Consu
 
     private function aCentavos(string $amount): int
     {
-        return (int) round(((float) $amount) * 100);
+        // Sin floats: el monto llega como decimal exacto ("15000.50").
+        if (!preg_match('/^(\d+)(?:\.(\d{1,2}))?$/', trim($amount), $m)) {
+            throw new RuntimeException('Monto inválido para Wompi.');
+        }
+
+        return (int) $m[1] * 100 + (int) str_pad($m[2] ?? '', 2, '0');
     }
 
     private function http()
