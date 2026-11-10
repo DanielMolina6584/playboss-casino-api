@@ -25,6 +25,9 @@ class GoogleAuthController extends Controller
         $r->validate(['credential' => ['required', 'string', 'max:4096']]);
 
         $res = $this->google->autenticar($r->input('credential'), $r->ip(), $r->userAgent());
+        if ($res['mfa']) {
+            return $this->ok($res['mfa']);
+        }
         $incompleto = !$res['usuario']->perfilCompleto();
 
         return $this->ok([

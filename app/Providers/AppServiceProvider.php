@@ -7,6 +7,8 @@ use GuzzleHttp\Client as HttpClient;
 use Google\Service\Drive;
 use Google\Service\Firestore;
 use App\Contracts\PaymentGateway;
+use App\Service\Auth\Mfa\MfaAlmacen;
+use App\Service\Auth\Mfa\MfaAlmacenEloquent;
 use App\Service\Payment\FirebaseFunctionPaymentGateway;
 use App\Service\Payment\WompiPaymentGateway;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -25,6 +27,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(MfaAlmacen::class, MfaAlmacenEloquent::class);
         $this->app->bind(PaymentGateway::class, function ($app): PaymentGateway {
             return match (config('services.payment_gateway.driver')) {
                 'wompi' => $app->make(WompiPaymentGateway::class),
@@ -92,6 +95,9 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(5)->by(mb_strtolower((string) $r->input('correo')) . '|' . $r->ip()),
             Limit::perMinute(30)->by($r->ip()),
         ]);
+        // Tope bruto de peticiones del 2FA; el bloqueo por fallos (5 por 5 min por usuario+IP) está en SvcMfa.
+        RateLimiter::for('mfa-verificar', fn (Request $r) => Limit::perMinute(20)->by($r->ip()));
+        RateLimiter::for('mfa', fn (Request $r) => Limit::perMinute(10)->by($porUsuarioOIp($r) . '|' . $r->ip()));
         RateLimiter::for('recuperacion', fn (Request $r) => Limit::perMinute(5)->by($r->ip()));
         RateLimiter::for('apuestas', fn (Request $r) => Limit::perMinute(20)->by($porUsuarioOIp($r)));
         RateLimiter::for('pagos', fn (Request $r) => Limit::perMinute(10)->by($porUsuarioOIp($r)));

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Service\Auth\Mfa\SvcMfa;
 use App\Service\SvcFotoPerfil;
 use App\Service\SvcUsuario;
 use App\Models\Usuario\CredencialUsuario;
@@ -14,7 +15,8 @@ class AuthController extends Controller
 {
     public function __construct(
         private readonly SvcUsuario $svcUsuario,
-        private readonly SvcFotoPerfil $svcFotoPerfil
+        private readonly SvcFotoPerfil $svcFotoPerfil,
+        private readonly SvcMfa $mfa
     ) {
         parent::__construct();
     }
@@ -114,6 +116,16 @@ class AuthController extends Controller
             );
             $this->agregarError('Correo o contraseña incorrectos.');
             return $this->sendResponse(401);
+        }
+
+        // Con 2FA activo no se entrega token de API: solo un reto de corta vida que se canjea en POST /auth/mfa/verificar.
+        if ($this->mfa->activo($usuarioEncontrado->id_usuario)) {
+            $this->svcUsuario->registrarIntentoLogin($usuarioEncontrado->id_usuario, true, $this->getIp(), $this->request->userAgent(), 'mfa_pendiente', null, $correo);
+            foreach ($this->mfa->iniciarReto($usuarioEncontrado, 'password') as $clave => $valor) {
+                $this->setDataResponse($valor, $clave);
+            }
+            $this->respSinError();
+            return $this->sendResponse();
         }
 
         $nuevoToken = $usuarioEncontrado->createToken('playboss-api');

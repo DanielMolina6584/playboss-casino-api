@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\ConfiguracionController;
 use App\Http\Controllers\Api\ContactoController;
 use App\Http\Controllers\Api\LimiteJuegoController;
 use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\MfaController;
 use App\Http\Controllers\Api\RetiroController;
 use App\Http\Controllers\Api\ApuestaController;
 use App\Http\Controllers\Api\AuthController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\Api\GoogleAuthController;
 use App\Http\Controllers\Api\PagoController;
 use App\Http\Controllers\Api\PerfilController;
 use App\Http\Controllers\Api\RecuperacionController;
+use App\Http\Middleware\EnsureMfaRol;
 use App\Http\Middleware\EnsureRol;
 use App\Http\Middleware\EnsureUsuarioActivo;
 use App\Http\Middleware\VerificaRecaptcha;
@@ -31,6 +33,8 @@ Route::prefix('auth')->group(function () {
     Route::post('/registro', [AuthController::class, 'registro'])->middleware(['throttle:recuperacion', VerificaRecaptcha::class . ':registro']);
     Route::post('/login', [AuthController::class, 'login'])->middleware(['throttle:login', VerificaRecaptcha::class . ':login']);
     Route::post('/google', [GoogleAuthController::class, 'login'])->middleware('throttle:login');
+    // Segundo paso del login: canjea mfa_token + código por el token real (el bloqueo por intentos está en SvcMfa).
+    Route::post('/mfa/verificar', [MfaController::class, 'verificar'])->middleware('throttle:mfa-verificar');
     Route::post('/recuperar', [RecuperacionController::class, 'solicitar'])->middleware(['throttle:recuperacion', VerificaRecaptcha::class . ':recuperar']);
     Route::post('/restablecer', [RecuperacionController::class, 'restablecer'])->middleware(['throttle:recuperacion', VerificaRecaptcha::class . ':restablecer']);
 
@@ -38,6 +42,12 @@ Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/me', [AuthController::class, 'me']);
         Route::put('/google/completar', [GoogleAuthController::class, 'completar']);
+
+        Route::get('/mfa', [MfaController::class, 'estado']);
+        Route::post('/mfa/configurar', [MfaController::class, 'configurar'])->middleware('throttle:10,1');
+        Route::post('/mfa/activar', [MfaController::class, 'activar'])->middleware('throttle:mfa');
+        Route::post('/mfa/desactivar', [MfaController::class, 'desactivar'])->middleware('throttle:mfa');
+        Route::post('/mfa/recovery-codes', [MfaController::class, 'regenerarCodigos'])->middleware('throttle:mfa');
     });
 });
 
@@ -85,11 +95,11 @@ Route::middleware(['auth:sanctum', EnsureUsuarioActivo::class])->group(function 
     Route::post('/pagos/depositos', [PagoController::class, 'depositar'])->middleware('throttle:pagos');
     // Antes de /pagos/{referencia} para que "retiros" no se interprete como referencia.
     Route::get('/pagos/retiros', [RetiroController::class, 'index']);
-    Route::post('/pagos/retiros', [RetiroController::class, 'store'])->middleware('throttle:pagos');
+    Route::post('/pagos/retiros', [RetiroController::class, 'store'])->middleware(['throttle:pagos', EnsureMfaRol::class]);
     Route::get('/pagos/{referencia}', [PagoController::class, 'estado'])->middleware('throttle:pagos');
 
     // Administración
-    Route::prefix('admin')->middleware(EnsureRol::class . ':ADMIN')->group(function () {
+    Route::prefix('admin')->middleware([EnsureRol::class . ':ADMIN', EnsureMfaRol::class])->group(function () {
         Route::apiResource('equipos', EquipoAdminController::class);
         Route::apiResource('ligas', LigaAdminController::class);
         Route::apiResource('partidos', PartidoAdminController::class);
@@ -102,6 +112,7 @@ Route::middleware(['auth:sanctum', EnsureUsuarioActivo::class])->group(function 
         Route::post('retiros/{id}/rechazar', [RetiroAdminController::class, 'rechazar'])->whereNumber('id');
         Route::get('usuarios', [UsuarioAdminController::class, 'index']);
         Route::put('usuarios/{id}/estado', [UsuarioAdminController::class, 'cambiarEstado'])->whereNumber('id');
+        Route::post('usuarios/{id}/mfa/restablecer', [UsuarioAdminController::class, 'restablecerMfa'])->whereNumber('id');
     });
 });
 
