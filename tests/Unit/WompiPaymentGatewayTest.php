@@ -47,6 +47,27 @@ class WompiPaymentGatewayTest extends TestCase
         );
     }
 
+    public function test_firma_con_expiration_time_lo_intercala_antes_del_secreto(): void
+    {
+        $g = new WompiPaymentGateway();
+        $this->assertSame(
+            hash('sha256', 'R1' . 100 . 'COP' . '2030-01-01T00:00:00.000Z' . self::INTEGRITY),
+            $g->firmaIntegridad('R1', 100, 'COP', '2030-01-01T00:00:00.000Z')
+        );
+    }
+
+    public function test_monto_a_centavos_es_exacto_y_rechaza_invalidos(): void
+    {
+        $g = new WompiPaymentGateway();
+        foreach (['0.29' => '29', '19.99' => '1999', '15000' => '1500000', '15000.5' => '1500050'] as $monto => $esperado) {
+            $r = $g->crearIntento(['transaction_id' => 1, 'amount' => (string) $monto, 'currency' => 'COP'], 'k');
+            parse_str(parse_url($r['checkout_url'], PHP_URL_QUERY), $q);
+            $this->assertSame($esperado, $q['amount-in-cents']);
+        }
+        $this->expectException(\RuntimeException::class);
+        $g->crearIntento(['transaction_id' => 1, 'amount' => '1.234', 'currency' => 'COP'], 'k');
+    }
+
     public function test_crear_intento_devuelve_referencia_y_url_de_checkout_con_firma(): void
     {
         $g = new WompiPaymentGateway();
@@ -57,7 +78,8 @@ class WompiPaymentGatewayTest extends TestCase
         parse_str(parse_url($r['checkout_url'], PHP_URL_QUERY), $q);
         $this->assertSame('pub_test_x', $q['public-key']);
         $this->assertSame('1500000', $q['amount-in-cents']);
-        $this->assertSame($g->firmaIntegridad($r['reference'], 1500000, 'COP'), $q['signature:integrity']);
+        $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/', $q['expiration-time']);
+        $this->assertSame($g->firmaIntegridad($r['reference'], 1500000, 'COP', $q['expiration-time']), $q['signature:integrity']);
 
         $d = $g->datosCheckout($r['reference'], 1500000, 'COP');
         $this->assertSame('COP', $d['currency']);

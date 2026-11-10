@@ -25,3 +25,7 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Guías con datos de conexión y credenciales (no versionar)
+/docs/credenciales/
+/CREDENCIALES.md

@@ -61,7 +61,10 @@ return [
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
-            ]) : [],
+                // true valida el certificado del servidor (nube); vacío = comportamiento local.
+                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_VERIFY_SERVER_CERT : PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT) => env('MYSQL_ATTR_SSL_VERIFY'),
+                PDO::ATTR_TIMEOUT => (int) env('MYSQL_CONNECT_TIMEOUT', 10),
+            ], fn ($value) => $value !== null && $value !== '') : [],
         ],
 
         'mariadb' => [
@@ -97,6 +100,10 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('POSTGRES_SSLMODE', 'prefer'),
+            'sslrootcert' => env('POSTGRES_SSLROOTCERT'),
+            'options' => extension_loaded('pdo_pgsql') ? [
+                PDO::ATTR_TIMEOUT => (int) env('POSTGRES_CONNECT_TIMEOUT', 10),
+            ] : [],
         ],
 
         'sqlsrv' => [
@@ -112,6 +119,7 @@ return [
             'prefix_indexes' => true,
             'encrypt' => env('SQLSERVER_ENCRYPT', 'yes'),
             'trust_server_certificate' => env('SQLSERVER_TRUST_SERVER_CERTIFICATE', 'false'),
+            'login_timeout' => (int) env('SQLSERVER_LOGIN_TIMEOUT', 15),
         ],
 
         'mongodb' => [
@@ -120,6 +128,8 @@ return [
             'database' => env('MONGODB_DATABASE', 'playboss'),
             'options' => [
                 'appName' => env('MONGODB_APP_NAME', env('APP_NAME', 'PlayBossAPI')),
+                'connectTimeoutMS' => (int) env('MONGODB_CONNECT_TIMEOUT_MS', 10000),
+                'serverSelectionTimeoutMS' => (int) env('MONGODB_SERVER_SELECTION_TIMEOUT_MS', 10000),
             ],
         ],
 

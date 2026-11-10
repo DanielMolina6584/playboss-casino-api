@@ -21,6 +21,7 @@ class PagoController extends Controller
 
     public function depositar(DepositoRequest $r): JsonResponse
     {
+        \App\Service\Auth\PerfilApostador::exigir((int) $r->user()->getAuthIdentifier());
         $transaccion = $this->pagos->iniciarDeposito(
             (int) $r->user()->getAuthIdentifier(),
             (string) $r->input('monto'),

@@ -11,6 +11,7 @@ use App\Models\Account\Movimiento;
 use App\Models\Payment\EventoPago;
 use App\Models\Payment\Transaccion;
 use App\Service\Account\AccountService;
+use App\Service\Account\LimiteJuegoService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -19,7 +20,8 @@ class PagoService
 {
     public function __construct(
         private readonly PaymentGateway $gateway,
-        private readonly AccountService $accounts
+        private readonly AccountService $accounts,
+        private readonly LimiteJuegoService $limites
     ) {
     }
 
@@ -31,6 +33,14 @@ class PagoService
         }
         if ($centavos < (int) config('services.payment_gateway.minimum_amount_minor', 100)) {
             throw ValidationException::withMessages(['monto' => 'El depósito está por debajo del mínimo permitido.']);
+        }
+
+        if ($centavos > $this->accounts->aCentavos((string) config('playboss.deposits.max_amount', '10000000.00'))) {
+            throw ValidationException::withMessages(['monto' => 'El depósito supera el máximo permitido.']);
+        }
+        // Un reintento idempotente no vuelve a contar contra los límites de juego responsable.
+        if (!Transaccion::query()->where('clave_idempotencia', $claveIdempotencia)->exists()) {
+            $this->limites->validarDeposito($usuarioId, $centavos);
         }
 
         $cuenta = $this->accounts->abrir($usuarioId);
