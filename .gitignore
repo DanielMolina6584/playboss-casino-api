@@ -25,7 +25,7 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
-
-# Guías con datos de conexión y credenciales (no versionar)
+/.env.nube
+/storage/app/private/nube/
 /docs/credenciales/
 /CREDENCIALES.md
