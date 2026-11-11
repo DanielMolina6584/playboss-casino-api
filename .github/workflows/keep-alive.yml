@@ -1,0 +1,18 @@
+name: Mantener API despierta
+
+# Render (plan gratuito) duerme el servicio tras ~15 min sin tráfico y el primer
+# request tarda ~25 s. Este ping cada 10 min evita el arranque en frío.
+# Define la variable de repositorio API_PING_URL (Settings > Secrets and variables > Actions > Variables),
+# por ejemplo https://playboss-api.onrender.com/api/configuracion/limites
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.API_PING_URL != '' }}
+    steps:
+      - name: Ping a la API
+        run: curl -fsS -m 60 --retry 2 --retry-delay 5 -o /dev/null -w "HTTP %{http_code} en %{time_total}s\n" "${{ vars.API_PING_URL }}"

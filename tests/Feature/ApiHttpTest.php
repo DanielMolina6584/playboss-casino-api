@@ -110,6 +110,11 @@ class ApiHttpTest extends TestCase
         $this->getJson('/api/partidos?estado=XXXX')->assertStatus(422)->assertJsonValidationErrorFor('estado', 'data.errores');
     }
 
+    public function test_con_mercados_debe_ser_booleano(): void
+    {
+        $this->getJson('/api/partidos?con_mercados=quizas')->assertStatus(422)->assertJsonValidationErrorFor('con_mercados', 'data.errores');
+    }
+
     public function test_webhook_ignora_eventos_que_no_son_de_transaccion(): void
     {
         $this->postJson('/api/pagos/wompi/webhook', ['event' => 'nequi_token.updated'])->assertOk();

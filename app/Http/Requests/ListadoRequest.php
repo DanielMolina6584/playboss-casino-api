@@ -39,6 +39,7 @@ class ListadoRequest extends FormRequest
             'hasta' => ['sometimes', 'date', 'after_or_equal:desde'],
             'orden' => ['sometimes', 'in:asc,desc'],
             'tipo' => ['sometimes', 'string', 'max:30'],
+            'con_mercados' => ['sometimes', 'boolean'],
         ];
     }
 
