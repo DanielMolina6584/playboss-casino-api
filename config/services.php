@@ -75,9 +75,21 @@ return [
         'jwks_url' => 'https://www.googleapis.com/oauth2/v3/certs',
     ],
 
+    // Mercado Pago (Checkout Pro). Pruebas: credenciales de prueba + usuario comprador de prueba.
+    'mercadopago' => [
+        'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
+        'public_key' => env('MERCADOPAGO_PUBLIC_KEY'),
+        'webhook_secret' => env('MERCADOPAGO_WEBHOOK_SECRET'),
+        'base_url' => env('MERCADOPAGO_BASE_URL', 'https://api.mercadopago.com'),
+        'redirect_url' => env('MERCADOPAGO_REDIRECT_URL'),
+        'notification_url' => env('MERCADOPAGO_NOTIFICATION_URL'),
+        'use_sandbox_url' => (bool) env('MERCADOPAGO_USE_SANDBOX_URL', false),
+        'expiration_minutes' => (int) env('MERCADOPAGO_EXPIRATION_MINUTES', 60),
+    ],
+
     'payment_gateway' => [
         'driver' => env('PAYMENT_GATEWAY_DRIVER', 'firebase_function'),
-        'method_code' => env('PAYMENT_METHOD_CODE', env('PAYMENT_GATEWAY_DRIVER', 'firebase_function') === 'wompi' ? 'WOMPI' : 'FIREBASE'),
+        'method_code' => env('PAYMENT_METHOD_CODE', match (env('PAYMENT_GATEWAY_DRIVER', 'firebase_function')) { 'wompi' => 'WOMPI', 'mercadopago' => 'MERCADOPAGO', default => 'FIREBASE' }),
         'firebase_function_url' => env('FIREBASE_PAYMENT_FUNCTION_URL'),
         'firebase_function_token' => env('FIREBASE_PAYMENT_FUNCTION_TOKEN'),
         'minimum_amount_minor' => (int) env('PAYMENT_MINIMUM_AMOUNT_MINOR', 100),

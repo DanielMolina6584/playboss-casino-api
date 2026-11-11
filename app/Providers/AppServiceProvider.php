@@ -10,6 +10,7 @@ use App\Contracts\PaymentGateway;
 use App\Service\Auth\Mfa\MfaAlmacen;
 use App\Service\Auth\Mfa\MfaAlmacenEloquent;
 use App\Service\Payment\FirebaseFunctionPaymentGateway;
+use App\Service\Payment\MercadoPagoPaymentGateway;
 use App\Service\Payment\WompiPaymentGateway;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -31,6 +32,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PaymentGateway::class, function ($app): PaymentGateway {
             return match (config('services.payment_gateway.driver')) {
                 'wompi' => $app->make(WompiPaymentGateway::class),
+                'mercadopago' => $app->make(MercadoPagoPaymentGateway::class),
                 'firebase_function' => $app->make(FirebaseFunctionPaymentGateway::class),
                 default => throw new InvalidArgumentException('PAYMENT_GATEWAY_DRIVER no está soportado.'),
             };

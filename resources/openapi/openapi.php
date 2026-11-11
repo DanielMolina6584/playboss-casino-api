@@ -338,6 +338,26 @@ $paths['/pagos/wompi/webhook'] = ['post' => [
     ],
 ]];
 
+$paths['/pagos/mercadopago/webhook'] = ['post' => [
+    'tags' => ['Pagos'], 'operationId' => 'pagosWebhookMercadoPago', 'summary' => 'Webhook de notificaciones de Mercado Pago',
+    'description' => "**Público** (sin Bearer): lo invoca Mercado Pago cuando \`PAYMENT_GATEWAY_DRIVER=mercadopago\`. Solo se procesa \`type = payment\`; otros tipos responden 200 \`Evento ignorado.\`.\n\n1. Si \`MERCADOPAGO_WEBHOOK_SECRET\` está configurado se valida el header \`x-signature\` (\`ts=...,v1=...\`): \`v1 = HMAC-SHA256(\"id:<data.id>;request-id:<x-request-id>;ts:<ts>;\", secreto)\`.\n2. Aunque la firma sea válida, el estado, monto, moneda y referencia se **consultan en la API de Mercado Pago** (\`GET /v1/payments/{id}\`) y se comparan con la transacción local; no se confía en el cuerpo.\n\nEs idempotente (clave \`mercadopago:<id>:<estado>\`): con \`approved\` se acredita el saldo una sola vez en una transacción PostgreSQL. Estados: approved→APPROVED, rejected→DECLINED, cancelled→CANCELLED; pending/in_process quedan pendientes.{\$limites}120/min por IP.",
+    'security' => [],
+    'parameters' => [
+        $p('data.id', 'query', $str('987654321'), 'Id del pago en Mercado Pago.'),
+        $p('type', 'query', $str('payment'), 'Tipo de notificación; solo se procesa \`payment\`.'),
+        $p('x-signature', 'header', $str('ts=1700000000,v1=...'), 'Firma de Mercado Pago (obligatoria si hay secreto configurado).'),
+        $p('x-request-id', 'header', $str('a1b2c3d4'), 'Id de la solicitud, parte del manifiesto firmado.'),
+    ],
+    'requestBody' => $bodyJson('MercadoPagoEvento', ['action' => 'payment.updated', 'type' => 'payment', 'data' => ['id' => '987654321']], false, 'Notificación de pago de Mercado Pago.'),
+    'responses' => [
+        '200' => $ok('Evento procesado o ignorado.', ['type' => 'array', 'items' => new stdClass(), 'maxItems' => 0], [], ['Evento procesado.']),
+        '401' => $errEx('Firma inválida o pago no verificado.', ['El evento de pago no fue verificado.']),
+        '409' => $errEx('La transacción ya fue cerrada con otro estado.', ['La transacción ya fue cerrada con otro estado.']),
+        '422' => $errEx('El pago no coincide con monto/moneda/tipo de la transacción local.', ['El evento no coincide con el monto, moneda o tipo de la transacción.']),
+        '429' => $e429, '500' => $e500, '502' => $e502,
+    ],
+]];
+
 // ---- Admin: CRUD genérico
 $adminTag = 'Admin';
 $crud = function (string $path, string $schema, string $createSchema, string $updateSchema, string $nombre, string $plural, mixed $createEj, mixed $item, array $filtros = [], string $idDesc = 'Id numérico del registro.', string $deleteNote = '', string $idType = 'int') use ($p, $int, $str, $ok, $paged, $ref, $meta, $pageParams, $sec, $bodyJson, $adminErr, $e404, $e422, $e409, $errEx, &$paths, $adminTag): void {
@@ -720,6 +740,11 @@ $schemas = [
         'referencia' => $str('PB-31-K8QZ4M2T'), 'estado' => $str('PENDIENTE'), 'monto' => $monto('50000.00'), 'moneda' => $str('COP'), 'tipo' => $str('DEPOSITO'), 'creada_en' => $fecha, 'confirmada_en' => $nullable($fecha),
         'checkout' => $ref('Checkout') + ['description' => '`null` si el driver de pagos no expone datos de checkout.'], 'checkout_url' => $nullable($str('https://checkout.wompi.co/p/?...')) + ['description' => 'Alias de `checkout.checkout_url` (campo `url_redireccion` de la transacción).'],
     ]),
+    'MercadoPagoEvento' => $obj([
+        'action' => $str('payment.updated'),
+        'type' => $str('payment', ['description' => 'Solo se procesa `payment`.']),
+        'data' => $obj(['id' => $str('987654321', ['description' => 'Id del pago; el estado real se consulta en la API de Mercado Pago.'])], ['id'], ['additionalProperties' => true]),
+    ], [], ['additionalProperties' => true]),
     'WompiEvento' => $obj([
         'event' => $str('transaction.updated', ['description' => 'Solo se procesa `transaction.updated`.']),
         'data' => $obj(['transaction' => $obj(['id' => $str('1234-1700000000-56789'), 'status' => $str('APPROVED', ['enum' => ['APPROVED', 'DECLINED', 'VOIDED', 'ERROR', 'PENDING']]), 'reference' => $str('PB-31-K8QZ4M2T'), 'amount_in_cents' => $int(5000000), 'currency' => $str('COP')], [], ['additionalProperties' => true])], [], ['additionalProperties' => true]),

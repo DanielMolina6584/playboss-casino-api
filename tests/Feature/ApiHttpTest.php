@@ -144,6 +144,21 @@ class ApiHttpTest extends TestCase
             ->assertOk()->assertJson(['error' => 0]);
     }
 
+    public function test_webhook_mercadopago_ignora_otros_tipos(): void
+    {
+        $this->postJson('/api/pagos/mercadopago/webhook', ['type' => 'merchant_order', 'data' => ['id' => '1']])->assertOk();
+    }
+
+    public function test_webhook_mercadopago_delega_en_el_servicio_con_el_id_del_pago(): void
+    {
+        $mock = Mockery::mock(PagoService::class);
+        $mock->shouldReceive('confirmarEvento')->once()->withArgs(fn ($e) => $e['data_id'] === '777' && $e['x_signature'] === 'ts=1,v1=a' && $e['x_request_id'] === 'rq');
+        $this->app->instance(PagoService::class, $mock);
+
+        $this->postJson('/api/pagos/mercadopago/webhook?data.id=777&type=payment', ['type' => 'payment', 'data' => ['id' => '777']], ['x-signature' => 'ts=1,v1=a', 'x-request-id' => 'rq'])
+            ->assertOk()->assertJson(['error' => 0]);
+    }
+
     public function test_cors_permite_el_front_local(): void
     {
         $this->options('/api/partidos', [], [

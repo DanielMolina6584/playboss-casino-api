@@ -63,6 +63,24 @@ class PagoController extends Controller
         return $this->ok([], 200, ['Evento procesado.']);
     }
 
+    /** Público: Mercado Pago envía solo el id del pago; el estado real se consulta con el Access Token. */
+    public function webhookMercadoPago(Request $r): JsonResponse
+    {
+        $tipo = $r->query('type', $r->input('type', $r->query('topic')));
+        if ($tipo !== 'payment') {
+            return $this->ok([], 200, ['Evento ignorado.']);
+        }
+        // PHP convierte "data.id" de la query en "data_id"; el cuerpo JSON trae data.id.
+        $id = $r->query('data_id', $r->input('data.id', $r->query('id')));
+        $this->pagos->confirmarEvento([
+            'data_id' => is_scalar($id) ? (string) $id : '',
+            'x_signature' => (string) $r->header('x-signature'),
+            'x_request_id' => (string) $r->header('x-request-id'),
+        ]);
+
+        return $this->ok([], 200, ['Evento procesado.']);
+    }
+
     private function presentar(Transaccion $t, bool $conCheckout): array
     {
         $data = [

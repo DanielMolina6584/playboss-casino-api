@@ -73,6 +73,8 @@ Route::post('/contacto', [ContactoController::class, 'store'])->middleware('thro
 
 // Webhook público de Wompi (autenticidad: checksum + consulta a la API de Wompi)
 Route::post('/pagos/wompi/webhook', [PagoController::class, 'webhookWompi'])->middleware('throttle:webhook');
+// Webhook público de Mercado Pago (x-signature + consulta del pago con el Access Token)
+Route::post('/pagos/mercadopago/webhook', [PagoController::class, 'webhookMercadoPago'])->middleware('throttle:webhook');
 
 Route::middleware(['auth:sanctum', EnsureUsuarioActivo::class])->group(function () {
     Route::get('/perfil', [PerfilController::class, 'show']);
